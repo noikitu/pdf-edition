@@ -118,6 +118,45 @@ def test_recherche_vide(doc):
     assert pdf_ops.replace_all(doc, "", "x", False) == 0
 
 
+# ------------------------------------------------- résolution des identifiants
+
+def test_resolution_identifiant_valide(doc):
+    item = item_starting(doc, 0, "Titre")
+    resolus, restants = pdf_ops.resolve_edits(
+        doc, [{"id": item.id, "original": item.text, "text": "Nouveau titre"}]
+    )
+    assert resolus == {item.id: "Nouveau titre"} and restants == []
+
+
+def test_resolution_par_le_contenu_si_identifiant_perime(doc):
+    """Après une modification, les index bougent : on retrouve le fragment par son texte."""
+    cible = item_starting(doc, 0, "code@")
+    pdf_ops.apply_edits(doc, {item_starting(doc, 0, "Titre").id: "Titre plus long qu'avant"})
+
+    resolus, restants = pdf_ops.resolve_edits(
+        doc, [{"id": cible.id, "original": cible.text, "text": "nouveau@exemple.fr"}]
+    )
+    assert restants == []
+    assert pdf_ops.apply_edits(doc, resolus) == 1
+    assert "nouveau@exemple.fr" in doc[0].get_text()
+    assert "Titre plus long qu'avant" in doc[0].get_text()   # rien n'a été écrasé
+
+
+def test_identifiant_perime_sans_correspondance_est_refuse(doc):
+    item = item_starting(doc, 0, "Titre")
+    resolus, restants = pdf_ops.resolve_edits(
+        doc, [{"id": item.id, "original": "texte qui n'existe plus", "text": "peu importe"}]
+    )
+    assert resolus == {} and len(restants) == 1
+
+
+def test_identifiant_hors_page_est_refuse(doc):
+    resolus, restants = pdf_ops.resolve_edits(
+        doc, [{"id": "42-0-0-0", "original": "x", "text": "y"}]
+    )
+    assert resolus == {} and len(restants) == 1
+
+
 # ----------------------------------------------------------------- ajout de texte
 
 def test_ajout_de_texte(doc):

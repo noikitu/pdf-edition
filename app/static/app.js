@@ -57,8 +57,19 @@ function toast(message, isError) {
   toastTimer = setTimeout(() => { el.toast.hidden = true; }, isError ? 5000 : 2600);
 }
 
+const NETWORK_ERROR = 'Le serveur ne répond plus. Vérifiez qu’il tourne toujours dans le terminal.';
+
 async function api(path, options) {
-  const res = await fetch(path, options);
+  let res;
+  try {
+    res = await fetch(path, options);
+  } catch (_) {
+    // « Failed to fetch » : aucune réponse HTTP. Le plus souvent une connexion
+    // persistante fermée par le serveur, parfois le serveur arrêté.
+    const err = new Error(NETWORK_ERROR);
+    err.network = true;
+    throw err;
+  }
   if (!res.ok) {
     let detail = `Erreur ${res.status}`;
     try { detail = (await res.json()).detail || detail; } catch (_) { /* réponse non JSON */ }
@@ -162,6 +173,8 @@ function buildPages() {
   // Les premières pages sont chargées sans attendre l'observateur.
   [...el.viewer.children].slice(0, 3).forEach(loadPage);
 }
+
+const pageNode = (pno) => el.viewer.querySelector(`.page[data-page="${pno}"]`);
 
 /** Applique le zoom courant : les images suivent en CSS, la couche texte est redessinée. */
 function sizePages() {
@@ -302,16 +315,21 @@ async function commitEdit() {
   const original = div.dataset.original;
   if (text === original.trim()) { div.textContent = original; return; }
 
-  const node = div.closest('.page');
+  // La couche a pu être reconstruite pendant la saisie : on retrouve la page par
+  // son numéro plutôt que par le parent du fragment, qui peut être détaché.
+  const node = pageNode(+div.dataset.id.split('-')[0]);
   busy(true, 'Application de la modification…');
   try {
-    const data = await postJSON(`/api/${state.docId}/edit`, { edits: { [div.dataset.id]: text } });
+    const data = await postJSON(`/api/${state.docId}/edit`, {
+      edits: [{ id: div.dataset.id, text, original }],
+    });
     applyState(data);
     if (data.changed) {
-      await refreshPage(node);
+      if (node) await refreshPage(node);
       toast(text ? 'Texte modifié' : 'Texte supprimé');
     } else {
       div.textContent = original;
+      toast('Modification non appliquée : le texte n’a pas été retrouvé.', true);
     }
   } catch (err) {
     div.textContent = original;

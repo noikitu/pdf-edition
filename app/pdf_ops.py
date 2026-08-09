@@ -268,6 +268,49 @@ def _write(page: fitz.Page, item: TextItem, text: str) -> None:
     )
 
 
+def resolve_edits(
+    doc: fitz.Document, requests: list[dict]
+) -> tuple[dict[str, str], list[dict]]:
+    """Fait correspondre des demandes du client aux fragments actuels du document.
+
+    Les identifiants sont positionnels : ils changent dès qu'une page est
+    modifiée. On vérifie donc systématiquement que le fragment visé contient
+    toujours le texte que l'utilisateur avait sous les yeux, faute de quoi on le
+    retrouve par son contenu — ou on renonce, plutôt que d'écrire au mauvais
+    endroit. Renvoie ({id: nouveau_texte}, demandes non résolues).
+    """
+    resolved: dict[str, str] = {}
+    unresolved: list[dict] = []
+
+    by_page: dict[int, list[dict]] = {}
+    for req in requests:
+        try:
+            pno = int(str(req.get("id", "")).split("-", 1)[0])
+        except ValueError:
+            unresolved.append(req)
+            continue
+        by_page.setdefault(pno, []).append(req)
+
+    for pno, reqs in by_page.items():
+        if not 0 <= pno < doc.page_count:
+            unresolved.extend(reqs)
+            continue
+        items = extract_items(doc, pno)
+        index = {item.id: item for item in items}
+        for req in reqs:
+            original = req.get("original")
+            target = index.get(req["id"])
+            if target is not None and (original is None or target.text == original):
+                resolved[target.id] = req["text"]
+                continue
+            twins = [i for i in items if i.text == original] if original else []
+            if len(twins) == 1:
+                resolved[twins[0].id] = req["text"]
+            else:
+                unresolved.append(req)
+    return resolved, unresolved
+
+
 def apply_edits(doc: fitz.Document, edits: dict[str, str]) -> int:
     """Applique {item_id: nouveau_texte}. Un texte vide supprime le fragment."""
     by_page: dict[int, list[tuple[TextItem, str]]] = {}

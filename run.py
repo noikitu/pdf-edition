@@ -19,7 +19,16 @@ def main() -> None:
     print(f"\n  Éditeur PDF  →  {url}\n  Ctrl+C pour arrêter.\n")
     if not args.no_browser and not args.reload:
         webbrowser.open(url)
-    uvicorn.run("app.main:app", host=args.host, port=args.port, reload=args.reload)
+    uvicorn.run(
+        "app.main:app",
+        host=args.host,
+        port=args.port,
+        reload=args.reload,
+        # Par défaut uvicorn ferme les connexions inactives au bout de 5 s. Le
+        # navigateur, qui ne rejoue jamais un POST, échouerait alors sur la
+        # première modification faite après un temps de lecture.
+        timeout_keep_alive=120,
+    )
 
 
 if __name__ == "__main__":

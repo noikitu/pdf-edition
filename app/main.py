@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import re
 from pathlib import Path
+from typing import Optional
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response, StreamingResponse
@@ -42,8 +43,16 @@ def _state(session: Session) -> dict:
 # Modèles de requête
 # --------------------------------------------------------------------------
 
+class EditItem(BaseModel):
+    id: str
+    text: str
+    # Texte affiché au moment de la modification : sert à vérifier que l'on
+    # réécrit bien le fragment que l'utilisateur avait sous les yeux.
+    original: Optional[str] = None
+
+
 class EditPayload(BaseModel):
-    edits: dict[str, str] = Field(default_factory=dict)
+    edits: list[EditItem] = Field(default_factory=list)
 
 
 class TextBoxPayload(BaseModel):
@@ -115,14 +124,23 @@ def page_items(doc_id: str, pno: int) -> dict:
 def edit(doc_id: str, payload: EditPayload) -> dict:
     session = _session(doc_id)
     if not payload.edits:
-        return {"changed": 0, **_state(session)}
+        return {"changed": 0, "skipped": 0, **_state(session)}
+
+    resolved, unresolved = pdf_ops.resolve_edits(
+        session.doc, [e.model_dump() for e in payload.edits]
+    )
+    if unresolved and not resolved:
+        raise HTTPException(
+            409, "Le document a changé entre-temps : la page a été rechargée, réessayez."
+        )
+
     session.snapshot()
-    changed = pdf_ops.apply_edits(session.doc, payload.edits)
+    changed = pdf_ops.apply_edits(session.doc, resolved)
     if changed:
         session.version += 1
     else:
         session.undo_stack.pop()
-    return {"changed": changed, **_state(session)}
+    return {"changed": changed, "skipped": len(unresolved), **_state(session)}
 
 
 @app.post("/api/{doc_id}/textbox")

@@ -3,14 +3,19 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Éditeur PDF — corriger le texte d'un PDF</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📝</text></svg>">
+<title>LemonPDF — corriger le texte d'un PDF</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍋</text></svg>">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
 
 <header class="toolbar">
-  <div class="brand">📝 <span>Éditeur PDF</span></div>
+  <div class="brand">
+    <span class="brand-mark glass-lemon">🍋</span>
+    <span class="brand-name">LemonPDF</span>
+  </div>
+
+  <span class="sep" id="brand-sep"></span>
 
   <div class="group" id="doc-tools" hidden>
     <button id="btn-undo" title="Annuler (Ctrl+Z)" disabled>↶</button>
@@ -20,15 +25,18 @@
     <span id="zoom-label">100 %</span>
     <button id="btn-zoom-in" title="Zoomer">+</button>
     <span class="sep"></span>
-    <button id="btn-add" title="Ajouter un texte">➕ Texte</button>
-    <button id="btn-find" title="Rechercher et remplacer (Ctrl+F)">🔍 Remplacer</button>
+    <button id="btn-add" title="Ajouter un texte">＋ Texte</button>
+    <button id="btn-find" title="Rechercher et remplacer (Ctrl+F)">Remplacer</button>
   </div>
 
   <div class="spacer"></div>
 
+  <span class="idle-note" id="idle-note">Aucun document ouvert</span>
+
   <div class="group" id="doc-actions" hidden>
     <span class="filename" id="filename"></span>
-    <button id="btn-download" class="primary">⬇ Télécharger</button>
+    <span class="badge" id="mod-count" hidden></span>
+    <button id="btn-download" class="primary">↓ Télécharger</button>
     <button id="btn-close" title="Fermer le document">✕</button>
   </div>
 </header>
@@ -45,7 +53,10 @@
 <main id="main">
   <section id="dropzone" class="dropzone">
     <div class="dz-inner">
-      <div class="dz-icon">📄</div>
+      <div class="dz-icon">
+        <span class="fold"></span>
+        <span class="lines"><i></i><i></i><i></i></span>
+      </div>
       <h1>Modifiez le texte de votre PDF</h1>
       <p>Glissez un PDF ici, ou choisissez un fichier. Tout se passe sur votre machine.</p>
       <label class="file-btn">

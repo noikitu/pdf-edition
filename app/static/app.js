@@ -1,4 +1,4 @@
-/* Éditeur PDF — logique de l'interface.
+/* LemonPDF — logique de l'interface.
    Chaque page est une image rendue par le serveur, surmontée d'une couche de
    fragments de texte éditables positionnés aux coordonnées exactes du PDF. */
 

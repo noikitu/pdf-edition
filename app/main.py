@@ -1,4 +1,4 @@
-"""API web de l'éditeur PDF."""
+"""API web de LemonPDF."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ MAX_UPLOAD_MB = 40
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
-app = FastAPI(title="Éditeur PDF", docs_url="/api/docs", openapi_url="/api/openapi.json")
+app = FastAPI(title="LemonPDF", docs_url="/api/docs", openapi_url="/api/openapi.json")
 
 
 def _session(doc_id: str) -> Session:

@@ -1,4 +1,4 @@
-# Éditeur PDF
+# LemonPDF
 
 Application web **gratuite** pour corriger le texte d'un PDF comme dans un traitement de
 texte : on clique sur une phrase, on la réécrit, on télécharge le PDF corrigé.

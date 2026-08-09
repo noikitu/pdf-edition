@@ -8,7 +8,7 @@ import uvicorn
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Éditeur PDF")
+    parser = argparse.ArgumentParser(description="LemonPDF")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--reload", action="store_true", help="rechargement auto (développement)")
@@ -16,7 +16,7 @@ def main() -> None:
     args = parser.parse_args()
 
     url = f"http://{args.host}:{args.port}"
-    print(f"\n  Éditeur PDF  →  {url}\n  Ctrl+C pour arrêter.\n")
+    print(f"\n  LemonPDF  →  {url}\n  Ctrl+C pour arrêter.\n")
     if not args.no_browser and not args.reload:
         webbrowser.open(url)
     uvicorn.run(

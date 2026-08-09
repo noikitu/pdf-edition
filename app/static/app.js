@@ -39,15 +39,18 @@ const el = {
   overlay: $('#overlay'),
   overlayText: $('#overlay-text'),
   toast: $('#toast'),
+  compress: $('#btn-compress'),
 };
 
 /* ------------------------------------------------------------------ utils */
 
 let busyCount = 0;
-function busy(on, text) {
+/** `mode: 'squeeze'` bascule l'overlay sur l'illustration citron pressé. */
+function busy(on, text, mode) {
   busyCount = Math.max(0, busyCount + (on ? 1 : -1));
   el.overlayText.textContent = text || 'Traitement…';
   el.overlay.hidden = busyCount === 0;
+  if (busyCount === 0 || mode) el.overlay.classList.toggle('squeezing', mode === 'squeeze');
 }
 
 let toastTimer;
@@ -576,6 +579,34 @@ async function history(action) {
   } finally {
     busy(false);
   }
+}
+
+el.compress.addEventListener('click', compressDoc);
+
+async function compressDoc() {
+  if (!state.docId) return;
+  busy(true, 'Pressage du PDF…', 'squeeze');
+  try {
+    const data = await postJSON(`/api/${state.docId}/compress`, {});
+    applyState(data);
+    refreshAll();
+    if (data.after < data.before) {
+      const pct = Math.round((1 - data.after / data.before) * 100);
+      toast(`PDF allégé de ${pct} % (${formatSize(data.before)} → ${formatSize(data.after)})`);
+    } else {
+      toast('Déjà bien pressé : aucun gain possible');
+    }
+  } catch (err) {
+    toast(err.message, true);
+  } finally {
+    busy(false);
+  }
+}
+
+function formatSize(bytes) {
+  return bytes >= 1024 * 1024
+    ? `${(bytes / (1024 * 1024)).toFixed(1)} Mo`
+    : `${Math.round(bytes / 1024)} Ko`;
 }
 
 function setZoom(delta) {

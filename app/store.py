@@ -39,6 +39,13 @@ class Session:
         self.version += 1
         return True
 
+    def replace_doc(self, data: bytes) -> None:
+        """Remplace le document par une version sérialisée (ex. après compression),
+        en conservant l'historique déjà accumulé — seul l'état courant change."""
+        self.doc.close()
+        self.doc = fitz.open(stream=data, filetype="pdf")
+        self.version += 1
+
     def undo(self) -> bool:
         return self._swap(self.undo_stack, self.redo_stack)
 

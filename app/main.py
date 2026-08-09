@@ -222,6 +222,18 @@ def redo(doc_id: str) -> dict:
     return {"ok": session.redo(), **_state(session)}
 
 
+@app.post("/api/{doc_id}/compress")
+def compress(doc_id: str) -> dict:
+    session = _session(doc_id)
+    session.snapshot()
+    data, before, after = pdf_ops.compress_pdf(session.doc)
+    if after < before:
+        session.replace_doc(data)
+    else:
+        session.undo_stack.pop()
+    return {"before": before, "after": after, **_state(session)}
+
+
 @app.get("/api/{doc_id}/download")
 def download(doc_id: str) -> StreamingResponse:
     session = _session(doc_id)

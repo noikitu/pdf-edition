@@ -191,12 +191,85 @@ def export_pdf(doc: fitz.Document) -> bytes:
     export = fitz.open("pdf", data)
     try:
         export.subset_fonts()
-        data = export.tobytes(garbage=4, deflate=True)
+        data = export.tobytes(garbage=4, deflate=True, use_objstms=True)
     except Exception:
         pass        # sous-ensemblage impossible : on exporte tel quel
     finally:
         export.close()
     return data
+
+
+# Au-delà de cette dimension, une image est redimensionnée avant réencodage :
+# suffisant pour remplir un écran, inutile pour un PDF destiné à l'impression bureau.
+COMPRESS_MAX_DIM = 1600
+COMPRESS_JPEG_QUALITY = 60
+
+
+def compress_pdf(doc: fitz.Document) -> tuple[bytes, int, int]:
+    """Réduit le poids du PDF en réencodant ses images, sans toucher au texte.
+
+    Renvoie (données du PDF compressé, taille avant, taille après).
+
+    Les images sans transparence sont réencodées en JPEG à qualité 60 et
+    redimensionnées si elles dépassent COMPRESS_MAX_DIM ; le résultat n'est
+    conservé que s'il est réellement plus léger. Les images avec transparence
+    sont laissées intactes : les reconvertir en PNG après extraction du canal
+    alpha produit souvent un fichier plus gros que l'original, pas plus petit.
+
+    `fitz.Page.replace_image` attache par défaut un profil ICC complet à
+    chaque image réencodée (quelques Ko chacun, là où l'original n'utilisait
+    souvent qu'un `/DeviceRGB` sans profil) : sur un document à dizaines
+    d'images, cela peut faire gagner l'image et perdre le fichier. On écrit
+    donc le flux directement via `update_stream`, avec un dictionnaire minimal.
+    """
+    before = len(doc.tobytes(garbage=3, deflate=True))
+
+    seen: set[int] = set()
+    for pno in range(doc.page_count):
+        page = doc[pno]
+        for image in page.get_images(full=True):
+            xref = image[0]
+            if xref in seen:
+                continue
+            seen.add(xref)
+            _compress_image(doc, xref)
+
+    doc.subset_fonts()
+    data = doc.tobytes(garbage=4, deflate=True, use_objstms=True)
+    return data, before, len(data)
+
+
+def _compress_image(doc: fitz.Document, xref: int) -> None:
+    try:
+        pix = fitz.Pixmap(doc, xref)
+    except Exception:
+        return   # image illisible (CMYK exotique, flux corrompu…) : on la laisse
+    if pix.alpha:
+        return   # transparence : la reconversion grossirait plutôt qu'elle n'allège
+
+    grayscale = pix.n == 1
+    if not grayscale and pix.colorspace and pix.colorspace.name != "DeviceRGB":
+        pix = fitz.Pixmap(fitz.csRGB, pix)
+
+    if max(pix.width, pix.height) > COMPRESS_MAX_DIM:
+        scale = COMPRESS_MAX_DIM / max(pix.width, pix.height)
+        pix = fitz.Pixmap(pix, max(1, round(pix.width * scale)), max(1, round(pix.height * scale)), None)
+
+    try:
+        before_bytes = len(doc.extract_image(xref)["image"])
+        data = pix.tobytes("jpeg", jpg_quality=COMPRESS_JPEG_QUALITY)
+    except Exception:
+        return
+    if len(data) >= before_bytes:
+        return   # déjà mieux compressée que ce qu'on proposerait : on n'y touche pas
+
+    doc.update_stream(xref, data, new=0, compress=0)
+    doc.xref_set_key(xref, "Filter", "/DCTDecode")
+    doc.xref_set_key(xref, "ColorSpace", "/DeviceGray" if grayscale else "/DeviceRGB")
+    doc.xref_set_key(xref, "Width", str(pix.width))
+    doc.xref_set_key(xref, "Height", str(pix.height))
+    doc.xref_set_key(xref, "BitsPerComponent", "8")
+    doc.xref_set_key(xref, "DecodeParms", "null")
 
 
 def render_page(doc: fitz.Document, pno: int, scale: float = 2.0) -> bytes:

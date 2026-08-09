@@ -27,6 +27,7 @@
     <span class="sep"></span>
     <button id="btn-add" title="Ajouter un texte">＋ Texte</button>
     <button id="btn-find" title="Rechercher et remplacer (Ctrl+F)">Remplacer</button>
+    <button id="btn-compress" title="Réduire le poids du PDF">🍋 Compresser</button>
   </div>
 
   <div class="spacer"></div>
@@ -74,7 +75,39 @@
   <section id="viewer" class="viewer" hidden></section>
 </main>
 
-<div id="overlay" class="overlay" hidden><div class="spinner"></div><span id="overlay-text">Chargement…</span></div>
+<div id="overlay" class="overlay" hidden>
+  <div class="spinner"></div>
+  <svg id="squeeze-art" class="squeeze-art" viewBox="0 0 160 150" hidden>
+    <ellipse class="squeeze-drop-shadow" cx="80" cy="132" rx="30" ry="6"></ellipse>
+    <g class="squeeze-drips">
+      <circle class="drip drip-1" cx="66" cy="92" r="3"></circle>
+      <circle class="drip drip-2" cx="80" cy="96" r="3.4"></circle>
+      <circle class="drip drip-3" cx="94" cy="92" r="3"></circle>
+    </g>
+    <g class="squeeze-lemon">
+      <ellipse cx="80" cy="88" rx="34" ry="26" fill="#ffe763"></ellipse>
+      <ellipse cx="80" cy="88" rx="34" ry="26" fill="url(#squeeze-shine)"></ellipse>
+      <path class="squeeze-lemon-tip" d="M111 84c5-3 9-2 11 1-3 2-7 2-11-1z" fill="#e8c94a"></path>
+      <path class="squeeze-lemon-tip" d="M49 84c-5-3-9-2-11 1 3 2 7 2 11-1z" fill="#e8c94a"></path>
+      <g class="squeeze-lemon-lines" stroke="#e6c247" stroke-width="1.6" stroke-linecap="round" fill="none">
+        <path d="M56 78c8-6 40-6 48 0"></path>
+        <path d="M54 92c10 5 42 5 52 0"></path>
+        <path d="M60 102c6 3 34 3 40 0"></path>
+      </g>
+    </g>
+    <g class="squeeze-hand">
+      <path d="M40 8c-3-6-12-6-14 1l-6 20c-6 4-9 12-6 20l10 26c4 10 15 16 26 14l40-8c9-2 15-10 14-19l-4-30c-1-8-9-13-16-11l-3 1 2-15c1-6-4-11-9-10-4 1-6 4-6 8l-1 12-2-16c-1-6-6-10-11-8-4 1-6 5-5 9l2 16-3-19z"
+            fill="#ffd8b0" stroke="#e8ad78" stroke-width="1.5"></path>
+    </g>
+    <defs>
+      <radialGradient id="squeeze-shine" cx="35%" cy="30%" r="70%">
+        <stop offset="0%" stop-color="#fff6c8" stop-opacity=".9"></stop>
+        <stop offset="100%" stop-color="#ffe763" stop-opacity="0"></stop>
+      </radialGradient>
+    </defs>
+  </svg>
+  <span id="overlay-text">Chargement…</span>
+</div>
 <div id="toast" class="toast" hidden></div>
 
 <script src="/app.js"></script>

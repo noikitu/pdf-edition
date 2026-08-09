@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import pdf_ops
+from . import fonts, pdf_ops
 from .store import Session, store
 
 MAX_UPLOAD_MB = 40
@@ -43,12 +43,19 @@ def _state(session: Session) -> dict:
 # Modèles de requête
 # --------------------------------------------------------------------------
 
+class StylePayload(BaseModel):
+    family: Optional[str] = None   # clé de fonts.CHOICES, None = police du document
+    bold: bool = False
+    italic: bool = False
+
+
 class EditItem(BaseModel):
     id: str
     text: str
     # Texte affiché au moment de la modification : sert à vérifier que l'on
     # réécrit bien le fragment que l'utilisateur avait sous les yeux.
     original: Optional[str] = None
+    style: Optional[StylePayload] = None
 
 
 class EditPayload(BaseModel):
@@ -75,6 +82,12 @@ class ReplacePayload(BaseModel):
 # --------------------------------------------------------------------------
 # Routes
 # --------------------------------------------------------------------------
+
+@app.get("/api/fonts")
+def font_catalogue() -> dict:
+    """Polices proposées dans l'interface, avec leur disponibilité sur la machine."""
+    return {"fonts": fonts.catalogue()}
+
 
 @app.post("/api/upload")
 async def upload(file: UploadFile = File(...)) -> dict:
@@ -135,12 +148,17 @@ def edit(doc_id: str, payload: EditPayload) -> dict:
         )
 
     session.snapshot()
-    changed = pdf_ops.apply_edits(session.doc, resolved)
-    if changed:
+    result = pdf_ops.apply_edits(session.doc, resolved)
+    if result:
         session.version += 1
     else:
         session.undo_stack.pop()
-    return {"changed": changed, "skipped": len(unresolved), **_state(session)}
+    return {
+        "changed": result.changed,
+        "approximated": result.approximated,
+        "skipped": len(unresolved),
+        **_state(session),
+    }
 
 
 @app.post("/api/{doc_id}/textbox")
@@ -172,14 +190,18 @@ def replace(doc_id: str, payload: ReplacePayload) -> dict:
     if not payload.search:
         raise HTTPException(400, "Terme de recherche vide.")
     session.snapshot()
-    changed = pdf_ops.replace_all(
+    result = pdf_ops.replace_all(
         session.doc, payload.search, payload.replace, payload.case_sensitive
     )
-    if changed:
+    if result:
         session.version += 1
     else:
         session.undo_stack.pop()
-    return {"changed": changed, **_state(session)}
+    return {
+        "changed": result.changed,
+        "approximated": result.approximated,
+        **_state(session),
+    }
 
 
 @app.get("/api/{doc_id}/search")
@@ -203,7 +225,7 @@ def redo(doc_id: str) -> dict:
 @app.get("/api/{doc_id}/download")
 def download(doc_id: str) -> StreamingResponse:
     session = _session(doc_id)
-    data = session.doc.tobytes(garbage=3, deflate=True)
+    data = pdf_ops.export_pdf(session.doc)
     stem = re.sub(r"[^A-Za-z0-9._-]+", "_", Path(session.name).stem) or "document"
     filename = f"{stem}-modifie.pdf"
     return StreamingResponse(

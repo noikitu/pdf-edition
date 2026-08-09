@@ -189,6 +189,32 @@ button.active { background: var(--accent-soft); border-color: var(--accent); col
 .page.adding { cursor: crosshair; }
 .page.adding .tf { pointer-events: none; }
 
+/* barre de choix de police, au-dessus du fragment en cours d'édition */
+.stylebar {
+  position: absolute;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  white-space: nowrap;
+}
+.stylebar select {
+  font: inherit;
+  font-size: 13px;
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ink);
+  max-width: 190px;
+}
+.stylebar button { padding: 3px 9px; font-size: 13px; line-height: 1.3; }
+
 /* boîte de saisie pour un nouveau texte */
 .newbox {
   position: absolute;

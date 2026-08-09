@@ -15,6 +15,8 @@ const state = {
   zoom: 1,
   adding: false,
   editing: null,   // élément .tf en cours d'édition
+  fonts: [],       // polices proposées par le serveur
+  style: null,     // barre de style ouverte sur le fragment en cours
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -216,6 +218,9 @@ function drawLayer(node, items) {
     div.textContent = item.text;
     div.dataset.id = item.id;
     div.dataset.original = item.text;
+    div.dataset.alias = item.font;
+    div.dataset.bold = item.bold ? '1' : '';
+    div.dataset.italic = item.italic ? '1' : '';
 
     const height = Math.max(y1 - y0, item.size);
     div.style.left = `${x0 * z}px`;
@@ -253,10 +258,82 @@ function startEdit(div, node) {
   div.spellcheck = true;
   div.focus();
   selectAll(div);
+  openStyleBar(div, node);
 
   div.addEventListener('keydown', onEditKey);
   div.addEventListener('paste', onPaste);
   div.addEventListener('blur', () => commitEdit(), { once: true });
+}
+
+/* ------------------------------------------------------- choix de la police */
+
+const CSS_FAMILY = {
+  arial: 'Arial, Helvetica, sans-serif',
+  times: '"Times New Roman", Times, serif',
+};
+
+/** Petite barre flottante au-dessus du fragment : police, gras, italique. */
+function openStyleBar(div, node) {
+  closeStyleBar();
+  const bar = document.createElement('div');
+  bar.className = 'stylebar';
+
+  const select = document.createElement('select');
+  select.innerHTML = '<option value="">Police du document</option>';
+  state.fonts.forEach((f) => {
+    const option = document.createElement('option');
+    option.value = f.key;
+    option.textContent = f.available ? f.label : `${f.label} (substituée)`;
+    select.appendChild(option);
+  });
+
+  const bold = document.createElement('button');
+  bold.innerHTML = '<b>G</b>';
+  bold.title = 'Gras';
+  bold.classList.toggle('active', div.dataset.bold === '1');
+
+  const italic = document.createElement('button');
+  italic.innerHTML = '<i>I</i>';
+  italic.title = 'Italique';
+  italic.classList.toggle('active', div.dataset.italic === '1');
+
+  bar.append(select, bold, italic);
+  // Sans cela, cliquer dans la barre ferait perdre le focus au texte, donc
+  // validerait la saisie avant même que le choix soit pris en compte.
+  bar.addEventListener('mousedown', (e) => e.preventDefault());
+
+  const apply = () => {
+    state.style.family = select.value || null;
+    state.style.bold = bold.classList.contains('active');
+    state.style.italic = italic.classList.contains('active');
+    state.style.touched = true;
+    div.style.fontFamily = CSS_FAMILY[select.value] || fontStack(div.dataset.alias || 'helv');
+    div.style.fontWeight = state.style.bold ? '700' : '400';
+    div.style.fontStyle = state.style.italic ? 'italic' : 'normal';
+  };
+  select.addEventListener('change', apply);
+  bold.addEventListener('click', () => { bold.classList.toggle('active'); apply(); });
+  italic.addEventListener('click', () => { italic.classList.toggle('active'); apply(); });
+
+  node.appendChild(bar);
+  const top = div.offsetTop - bar.offsetHeight - 6;
+  bar.style.left = `${Math.max(2, Math.min(div.offsetLeft, node.clientWidth - bar.offsetWidth - 2))}px`;
+  bar.style.top = `${top < 2 ? div.offsetTop + div.offsetHeight + 6 : top}px`;
+
+  state.style = {
+    bar,
+    family: null,
+    bold: div.dataset.bold === '1',
+    italic: div.dataset.italic === '1',
+    touched: false,
+  };
+}
+
+function closeStyleBar() {
+  if (state.style) {
+    state.style.bar.remove();
+    state.style = null;
+  }
 }
 
 function selectAll(div) {
@@ -311,9 +388,15 @@ async function commitEdit() {
   div.removeEventListener('keydown', onEditKey);
   div.removeEventListener('paste', onPaste);
 
+  const chosen = state.style && state.style.touched ? state.style : null;
+  const style = chosen
+    ? { family: chosen.family, bold: chosen.bold, italic: chosen.italic }
+    : null;
+  closeStyleBar();
+
   const text = div.textContent.replace(/\s+/g, ' ').trim();
   const original = div.dataset.original;
-  if (text === original.trim()) { div.textContent = original; return; }
+  if (text === original.trim() && !style) { div.textContent = original; return; }
 
   // La couche a pu être reconstruite pendant la saisie : on retrouve la page par
   // son numéro plutôt que par le parent du fragment, qui peut être détaché.
@@ -321,12 +404,14 @@ async function commitEdit() {
   busy(true, 'Application de la modification…');
   try {
     const data = await postJSON(`/api/${state.docId}/edit`, {
-      edits: [{ id: div.dataset.id, text, original }],
+      edits: [{ id: div.dataset.id, text, original, style }],
     });
     applyState(data);
     if (data.changed) {
       if (node) await refreshPage(node);
-      toast(text ? 'Texte modifié' : 'Texte supprimé');
+      if (!text) toast('Texte supprimé');
+      else if (data.approximated) toast('Texte modifié — police substituée');
+      else toast('Texte modifié');
     } else {
       div.textContent = original;
       toast('Modification non appliquée : le texte n’a pas été retrouvé.', true);
@@ -463,8 +548,9 @@ $('#btn-replace-all').addEventListener('click', async () => {
     });
     applyState(data);
     refreshAll();
-    el.findInfo.textContent = `${data.changed} fragment(s) modifié(s)`;
-    toast(data.changed ? `${data.changed} fragment(s) modifié(s)` : 'Aucune occurrence trouvée');
+    const approx = data.approximated ? `, dont ${data.approximated} en police approchée` : '';
+    el.findInfo.textContent = `${data.changed} fragment(s) modifié(s)${approx}`;
+    toast(data.changed ? `${data.changed} fragment(s) modifié(s)${approx}` : 'Aucune occurrence trouvée');
   } catch (err) {
     toast(err.message, true);
   } finally {
@@ -531,6 +617,10 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === 'f') { e.preventDefault(); toggleFind(true); }
   else if (e.key === 's') { e.preventDefault(); $('#btn-download').click(); }
 });
+
+api('/api/fonts')
+  .then((data) => { state.fonts = data.fonts; })
+  .catch(() => { state.fonts = []; });   // le sélecteur se limitera à « police du document »
 
 window.addEventListener('beforeunload', (e) => {
   if (state.docId && state.version > 0) { e.preventDefault(); e.returnValue = ''; }

@@ -26,6 +26,7 @@ Le navigateur s'ouvre sur <http://127.0.0.1:8000>. Options : `--port`, `--host`,
 | --- | --- |
 | Ouvrir un PDF | glisser-déposer, ou « Choisir un PDF » |
 | Corriger une phrase | cliquer dessus, taper, `Entrée` pour valider (`Échap` annule) |
+| Changer la police | pendant l'édition, menu **Arial / Times New Roman** + `G` / `I` au-dessus du texte |
 | Supprimer un texte | le vider puis `Entrée` |
 | Corriger partout | « Remplacer » → mot fautif, mot correct, « Tout remplacer » |
 | Ajouter un texte | « Texte », cliquer à l'endroit voulu, saisir, « Ajouter » |
@@ -43,13 +44,31 @@ fragment déclenche côté serveur :
 
 1. un **caviardage** (`redaction`) de la zone d'origine, qui retire l'ancien texte sans
    toucher aux images ni aux traits de la page ;
-2. une **réécriture** sur la même ligne de base, avec la police Base-14 la plus proche de
-   l'originale (sérif / sans / mono, gras, italique), la même taille et la même couleur ;
+2. une **réécriture** sur la même ligne de base, à la même taille et dans la même
+   couleur ;
 3. un nouveau rendu de la page, qui sert de retour visuel — ce que l'on voit est donc
    exactement le contenu du PDF, pas une simulation.
 
 Si le texte saisi est plus long que la place disponible, la taille est réduite
 progressivement (jusqu'à 75 % au maximum) pour ne pas déborder sur le fragment suivant.
+
+### Le choix de la police
+
+Par défaut, l'app essaie de conserver la typographie d'origine, dans cet ordre :
+
+1. **la police embarquée dans le PDF** — rendu strictement identique. Elle n'est
+   retenue que si elle contient tous les caractères saisis : les PDF n'embarquent
+   qu'un *sous-ensemble* de chaque police, limité aux glyphes réellement employés,
+   et écrire un caractère absent produirait un blanc ;
+2. **une police système de la même famille** (Arial, Times New Roman…), qui couvre
+   tout le latin pour un rendu visuellement identique ;
+3. **une police Base-14** approchante, toujours disponible.
+
+Le menu affiché pendant l'édition permet d'imposer **Arial** ou **Times New Roman**,
+en gras et/ou italique, au lieu de cette détection automatique.
+
+À l'export, les polices sont réduites aux seuls glyphes utilisés : écrire du texte
+embarque sinon la police entière, ce qui ajoute plus d'un mégaoctet par police.
 
 ## Limites connues
 
@@ -60,8 +79,9 @@ Ce sont celles du format PDF lui-même, qui n'a aucune notion de paragraphe :
   paragraphe entier.
 - **PDF scannés.** Une page qui n'est qu'une image ne contient pas de texte à éditer ; il
   faut d'abord lui appliquer un OCR.
-- **Polices non standard.** Le texte réécrit utilise une police Base-14 approchante et non
-  la police exacte du document (celle-ci n'est pas toujours intégrée ni redistribuable).
+- **Polices non standard.** Quand ni la police embarquée ni une police système de la même
+  famille ne convient, le texte réécrit tombe sur une Base-14 approchante ; l'app le
+  signale alors par « police substituée ».
 - **Texte pivoté** (vertical, en diagonale) : affiché, mais non éditable.
 - **PDF protégés par mot de passe** : à déverrouiller au préalable.
 - Alphabets hors latin-1 : le chinois / japonais / coréen utilise une police intégrée ;
@@ -73,6 +93,7 @@ Ce sont celles du format PDF lui-même, qui n'a aucune notion de paragraphe :
 app/
   main.py        API FastAPI (upload, rendu, édition, export)
   pdf_ops.py     moteur PyMuPDF : extraction et réécriture du texte
+  fonts.py       choix de la police : embarquée, système, ou Base-14
   store.py       sessions en mémoire + pile d'annulation
   static/        interface (HTML / CSS / JS sans dépendance)
 run.py           lancement local

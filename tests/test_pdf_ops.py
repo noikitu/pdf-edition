@@ -3,7 +3,7 @@
 import fitz
 import pytest
 
-from app import pdf_ops
+from app import fonts, pdf_ops
 
 
 @pytest.fixture()
@@ -51,11 +51,21 @@ def test_pages_et_rendu(doc):
     assert pdf_ops.render_page(doc, 0, scale=1).startswith(b"\x89PNG")
 
 
+def test_export_allege_les_polices(doc):
+    """Écrire embarque la police entière ; l'export doit la réduire."""
+    item = item_starting(doc, 0, "Titre")
+    pdf_ops.apply_edits(doc, {item.id: "Titre réécrit avec des caractères variés : ЖЩ"})
+    complet = len(doc.tobytes(garbage=3, deflate=True))
+    exporte = len(pdf_ops.export_pdf(doc))
+    assert exporte < complet
+    assert fitz.open("pdf", pdf_ops.export_pdf(doc))[0].get_text().strip()
+
+
 # --------------------------------------------------------------------- édition
 
 def test_modification_remplace_le_texte(doc):
     item = item_starting(doc, 0, "Une faute")
-    assert pdf_ops.apply_edits(doc, {item.id: "Une faute d'orthographe corrigée."}) == 1
+    assert pdf_ops.apply_edits(doc, {item.id: "Une faute d'orthographe corrigée."}).changed == 1
     texte = doc[0].get_text()
     assert "Une faute d'orthographe corrigée." in texte
     assert "ortografe" not in texte
@@ -69,17 +79,17 @@ def test_modification_conserve_les_traits(doc):
 
 def test_texte_vide_supprime_le_fragment(doc):
     item = item_starting(doc, 0, "code@")
-    assert pdf_ops.apply_edits(doc, {item.id: ""}) == 1
+    assert pdf_ops.apply_edits(doc, {item.id: ""}).changed == 1
     assert "code@exemple.fr" not in doc[0].get_text()
 
 
 def test_texte_identique_ignore(doc):
     item = item_starting(doc, 0, "Titre")
-    assert pdf_ops.apply_edits(doc, {item.id: item.text}) == 0
+    assert pdf_ops.apply_edits(doc, {item.id: item.text}).changed == 0
 
 
 def test_identifiant_inconnu_ignore(doc):
-    assert pdf_ops.apply_edits(doc, {"0-99-99-99": "peu importe"}) == 0
+    assert pdf_ops.apply_edits(doc, {"0-99-99-99": "peu importe"}).changed == 0
 
 
 def test_texte_long_est_reduit_mais_lisible(doc):
@@ -102,20 +112,20 @@ def test_accents_preserves(doc):
 
 def test_remplacement_global_multi_pages(doc):
     assert pdf_ops.count_matches(doc, "ortografe", case_sensitive=False) == 2
-    assert pdf_ops.replace_all(doc, "ortografe", "orthographe", case_sensitive=False) == 2
+    assert pdf_ops.replace_all(doc, "ortografe", "orthographe", case_sensitive=False).changed == 2
     assert "orthographe" in doc[0].get_text()
     assert "Orthographe" in doc[1].get_text()  # la casse d'origine est respectée
     assert pdf_ops.count_matches(doc, "ortografe", case_sensitive=False) == 0
 
 
 def test_remplacement_sensible_a_la_casse(doc):
-    assert pdf_ops.replace_all(doc, "Ortografe", "Orthographe", case_sensitive=True) == 1
+    assert pdf_ops.replace_all(doc, "Ortografe", "Orthographe", case_sensitive=True).changed == 1
     assert "ortografe" in doc[0].get_text()
 
 
 def test_recherche_vide(doc):
     assert pdf_ops.count_matches(doc, "", False) == 0
-    assert pdf_ops.replace_all(doc, "", "x", False) == 0
+    assert pdf_ops.replace_all(doc, "", "x", False).changed == 0
 
 
 # ------------------------------------------------- résolution des identifiants
@@ -125,7 +135,7 @@ def test_resolution_identifiant_valide(doc):
     resolus, restants = pdf_ops.resolve_edits(
         doc, [{"id": item.id, "original": item.text, "text": "Nouveau titre"}]
     )
-    assert resolus == {item.id: "Nouveau titre"} and restants == []
+    assert resolus == {item.id: pdf_ops.EditSpec("Nouveau titre")} and restants == []
 
 
 def test_resolution_par_le_contenu_si_identifiant_perime(doc):
@@ -137,7 +147,7 @@ def test_resolution_par_le_contenu_si_identifiant_perime(doc):
         doc, [{"id": cible.id, "original": cible.text, "text": "nouveau@exemple.fr"}]
     )
     assert restants == []
-    assert pdf_ops.apply_edits(doc, resolus) == 1
+    assert pdf_ops.apply_edits(doc, resolus).changed == 1
     assert "nouveau@exemple.fr" in doc[0].get_text()
     assert "Titre plus long qu'avant" in doc[0].get_text()   # rien n'a été écrasé
 
@@ -155,6 +165,51 @@ def test_identifiant_hors_page_est_refuse(doc):
         doc, [{"id": "42-0-0-0", "original": "x", "text": "y"}]
     )
     assert resolus == {} and len(restants) == 1
+
+
+def test_style_transmis_jusqu_a_l_ecriture(doc):
+    item = item_starting(doc, 0, "Titre")
+    resolus, _ = pdf_ops.resolve_edits(
+        doc,
+        [{
+            "id": item.id, "original": item.text, "text": "Titre en Times",
+            "style": {"family": "times", "bold": False, "italic": True},
+        }],
+    )
+    assert resolus[item.id].style == pdf_ops.Style("times", False, True)
+    pdf_ops.apply_edits(doc, resolus)
+    police = doc[0].get_text("dict")["blocks"][-1]["lines"][0]["spans"][0]["font"]
+    assert "Times" in police and "Italic" in police
+
+
+def test_style_absent_laisse_la_police_automatique(doc):
+    resolus, _ = pdf_ops.resolve_edits(
+        doc, [{"id": item_starting(doc, 0, "Titre").id, "text": "x", "style": {"family": None}}]
+    )
+    assert next(iter(resolus.values())).style is None
+
+
+# ------------------------------------------------------- polices choisies
+
+@pytest.mark.parametrize("cle", [c["key"] for c in fonts.CHOICES])
+def test_chaque_police_proposee_est_utilisable(cle):
+    for gras, italique in ((False, False), (True, False), (False, True), (True, True)):
+        police, _ = fonts.choice_font(cle, gras, italique)
+        assert all(police.has_glyph(ord(c)) for c in "Bonjour à tous — 123")
+
+
+def test_police_indisponible_est_signalee():
+    """Un substitut doit être annoncé comme tel, pas passé sous silence."""
+    catalogue = {c["key"]: c["available"] for c in fonts.catalogue()}
+    assert set(catalogue) == {"arial", "times"}
+    for cle, disponible in catalogue.items():
+        _, exact = fonts.choice_font(cle, False, False)
+        assert exact == disponible
+
+
+def test_police_inconnue_refusee():
+    with pytest.raises(KeyError):
+        fonts.choice_font("comic-sans-ms", False, False)
 
 
 # ----------------------------------------------------------------- ajout de texte
@@ -183,7 +238,95 @@ def test_correspondance_des_polices(nom, attendu):
 
 
 def test_police_de_repli_hors_latin1():
-    nom, _ = pdf_ops.resolve_font("helv", "Bonjour")
-    assert nom == "helv"
-    nom_cjk, _ = pdf_ops.resolve_font("helv", "こんにちは")
-    assert nom_cjk != "helv"
+    assert fonts.base14_font("helv", "Bonjour").name == "Helvetica"
+    cjk = fonts.base14_font("helv", "こんにちは")
+    assert cjk.name != "Helvetica"
+    assert all(cjk.has_glyph(ord(c)) for c in "こんにちは")
+
+
+def test_drapeau_serif_du_pdf_est_ignore(doc):
+    """Beaucoup de PDF marquent « serif » à tort ; le nom doit primer."""
+    assert pdf_ops.base14_alias("Aptos", pdf_ops.FLAG_SERIF) == "helv"
+    assert pdf_ops.base14_alias("Aptos,Bold", pdf_ops.FLAG_SERIF | pdf_ops.FLAG_BOLD) == "hebo"
+    assert pdf_ops.base14_alias("Garamond", 0) == "tiro"
+
+
+# ------------------------------------------------------------------ polices
+
+@pytest.mark.parametrize(
+    "basefont, famille, gras, italique",
+    [
+        ("BCDGEE+Aptos,Bold", "aptos", True, False),
+        ("ArialMT", "arial", False, False),
+        ("Arial-BoldMT", "arial", True, False),
+        ("TimesNewRomanPSMT", "timesnewroman", False, False),
+        ("Calibri-Italic", "calibri", False, True),
+        ("Helvetica", "helvetica", False, False),
+    ],
+)
+def test_lecture_du_nom_de_police(basefont, famille, gras, italique):
+    assert fonts.parse_basefont(basefont) == (famille, gras, italique)
+
+
+def test_police_embarquee_reutilisee_si_elle_couvre_le_texte(tmp_path):
+    """Le cas qui compte : corriger un mot en gardant la police du document."""
+    source = fitz.open()
+    page = source.new_page()
+    # insert_text avec un fichier de police intègre celle-ci dans le PDF.
+    chemin = fonts.find_system_font("georgia", False, False) or fonts.find_system_font(
+        "arial", False, False
+    )
+    if not chemin:
+        pytest.skip("aucune police système exploitable sur cette machine")
+    police = fitz.Font(fontfile=chemin)
+    writer = fitz.TextWriter(page.rect)
+    writer.append(fitz.Point(72, 100), "Le chat dort sur le tapis", font=police, fontsize=12)
+    writer.write_text(page)
+    fichier = tmp_path / "embarque.pdf"
+    source.save(fichier)
+    source.close()
+
+    doc = fitz.open(fichier)
+    item = pdf_ops.extract_items(doc, 0)[0]
+    # « sous » ne mobilise que des lettres déjà présentes dans le document
+    resultat = pdf_ops.apply_edits(doc, {item.id: "Le chat dort sous le tapis"})
+    assert resultat.changed == 1
+    assert resultat.approximated == 0        # typographie d'origine préservée
+    assert "dort sous le tapis" in doc[0].get_text()
+    doc.close()
+
+
+def test_garde_fou_de_couverture():
+    """C'est ce test qui empêche d'écrire des caractères invisibles."""
+    helvetica = fitz.Font("helv")
+    assert fonts.FontResolver._covers(helvetica, "Éàçù — français")
+    assert not fonts.FontResolver._covers(helvetica, "日本語")
+
+
+def test_la_police_choisie_couvre_toujours_le_texte(tmp_path):
+    """Sur une police sous-ensemblée, on bascule plutôt que d'écrire du vide.
+
+    Le sous-ensemblage retire la table d'encodage de la police : plus aucun
+    caractère n'y est adressable par son code, donc la police du document est
+    écartée — c'est le comportement prudent attendu.
+    """
+    source = fitz.open()
+    page = source.new_page()
+    chemin = fonts.find_system_font("arial", False, False)
+    if not chemin:
+        pytest.skip("aucune police système exploitable sur cette machine")
+    writer = fitz.TextWriter(page.rect)
+    writer.append(fitz.Point(72, 100), "abc", font=fitz.Font(fontfile=chemin), fontsize=12)
+    writer.write_text(page)
+    source.subset_fonts()
+    fichier = tmp_path / "sous-ensemble.pdf"
+    source.save(fichier)
+    source.close()
+
+    doc = fitz.open(fichier)
+    item = pdf_ops.extract_items(doc, 0)[0]
+    resolveur = fonts.FontResolver(doc)
+    for texte in ("abc", "abc z", "Éàçù"):
+        police, _ = resolveur.resolve(0, item.fontname, item.font, texte)
+        assert all(police.has_glyph(ord(c)) for c in texte), texte
+    doc.close()

@@ -80,6 +80,8 @@ function toast(message, isError) {
 }
 
 const NETWORK_ERROR = 'Le serveur ne répond plus. Vérifiez qu’il tourne toujours dans le terminal.';
+const STALE_SERVER_ERROR =
+  'Le serveur tourne dans une version plus ancienne que cette page : arrêtez-le (Ctrl+C) et relancez-le.';
 
 async function api(path, options) {
   let res;
@@ -93,6 +95,10 @@ async function api(path, options) {
     throw err;
   }
   if (!res.ok) {
+    // 405 sur une route de l'API : elle n'existe pas dans le serveur qui tourne,
+    // le POST est tombé sur le service des fichiers statiques. Autrement dit le
+    // serveur a été lancé avant cette version du code.
+    if (res.status === 405) throw new Error(STALE_SERVER_ERROR);
     let detail = `Erreur ${res.status}`;
     try { detail = (await res.json()).detail || detail; } catch (_) { /* réponse non JSON */ }
     throw new Error(detail);
@@ -1119,6 +1125,13 @@ document.addEventListener('keydown', (e) => {
 api('/api/fonts')
   .then((data) => { state.fonts = data.fonts; })
   .catch(() => { state.fonts = []; });   // le sélecteur se limitera à « police du document »
+
+// Un serveur laissé tourner depuis une version antérieure servirait cette page
+// tout en ignorant ses routes : autant le dire tout de suite plutôt qu'au
+// premier clic sur une fonctionnalité récente.
+fetch('/healthz').then((res) => {
+  if (!res.ok) toast(STALE_SERVER_ERROR, true);
+}).catch(() => { /* serveur injoignable : les appels suivants le signaleront */ });
 
 window.addEventListener('beforeunload', (e) => {
   if (state.docId && state.version > 0) { e.preventDefault(); e.returnValue = ''; }

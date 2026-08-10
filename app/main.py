@@ -147,7 +147,13 @@ def page_image(doc_id: str, pno: int, scale: float = 2.0, v: int = 0) -> Respons
         raise HTTPException(404, "Page inexistante.")
     scale = min(max(scale, 0.5), 4.0)
     png = pdf_ops.render_page(session.doc, pno, scale)
-    return Response(png, media_type="image/png", headers={"Cache-Control": "no-store"})
+    # L'URL porte le numéro de version du document : le contenu d'une adresse
+    # donnée ne change donc jamais, et on peut laisser le navigateur la garder.
+    # Sans cela, la loupe — qui repeint l'image à chaque mouvement de souris —
+    # relancerait un rendu serveur en continu.
+    return Response(
+        png, media_type="image/png", headers={"Cache-Control": "private, max-age=600"}
+    )
 
 
 @app.get("/api/{doc_id}/page/{pno}/items")

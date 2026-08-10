@@ -538,6 +538,71 @@ button.active {
   100% { opacity: 0; }
 }
 
+/* ------------------------------------------------------------------- loupe */
+
+/* Disque de verre suivant le curseur. `pointer-events: none` est indispensable :
+   sans lui la loupe intercepterait le clic destiné au texte qu'elle grossit. */
+.lens {
+  position: fixed;
+  z-index: 90;
+  width: 180px;
+  height: 180px;
+  border-radius: 50%;
+  pointer-events: none;
+  background-color: #fff;
+  background-repeat: no-repeat;
+  /* épaisseur du rebord de verre, en pixels */
+  --rim: 16px;
+  box-shadow:
+    /* biseau interne : ombre au nord-ouest, lumière au sud-est, comme un ménisque */
+    inset 0 2px 3px rgba(0, 0, 0, .22),
+    inset 0 -2px 4px rgba(255, 255, 255, .8),
+    inset 0 0 0 1px rgba(255, 255, 255, .55),
+    /* liseré du verre puis ombre portée sur la page */
+    0 0 0 1px rgba(120, 120, 100, .28),
+    0 0 0 3px rgba(255, 255, 255, .5),
+    0 16px 36px rgba(0, 0, 0, .28),
+    0 3px 8px rgba(0, 0, 0, .16);
+}
+
+/* Anneau réfractif : la même image, agrandie et légèrement floutée, ne s'affiche
+   que sur le pourtour. C'est ce décalage entre le centre net et le bord étiré qui
+   fait lire l'objet comme du verre épais plutôt que comme un simple cadre rond. */
+.lens::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: inherit;
+  transform: scale(1.09);
+  filter: blur(1.1px) saturate(1.12) brightness(1.02);
+  -webkit-mask: radial-gradient(closest-side,
+    transparent calc(100% - var(--rim)), #000 calc(100% - var(--rim) * .55), #000 100%);
+  mask: radial-gradient(closest-side,
+    transparent calc(100% - var(--rim)), #000 calc(100% - var(--rim) * .55), #000 100%);
+}
+
+/* Reflets : bandeau spéculaire en haut à gauche, rebond diffus en bas à droite,
+   assombrissement progressif du bord et frange colorée très discrète — la
+   dispersion chromatique d'une vraie lentille. */
+.lens::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background:
+    radial-gradient(38% 26% at 31% 19%, rgba(255, 255, 255, .92), rgba(255, 255, 255, 0) 70%),
+    radial-gradient(26% 18% at 72% 84%, rgba(255, 255, 255, .5), rgba(255, 255, 255, 0) 72%),
+    radial-gradient(closest-side, rgba(0, 0, 0, 0) 70%, rgba(30, 30, 20, .18) 100%);
+  box-shadow:
+    inset 0 0 6px 1px rgba(255, 245, 170, .35),
+    inset 2px 2px 5px rgba(140, 190, 255, .22),
+    inset -2px -2px 5px rgba(255, 200, 140, .22);
+}
+
+/* le curseur système n'a plus d'intérêt : la loupe est centrée sur lui */
+.viewer.lens-on .page { cursor: none; }
+
 /* --------------------------------------------------- barre de choix police */
 
 .stylebar {

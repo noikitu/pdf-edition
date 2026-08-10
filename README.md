@@ -67,6 +67,7 @@ répartiteur avec des sessions collantes, pas plusieurs workers.
 | Insérer une image ou une signature | « Image », choisir le fichier, cliquer sur la page, ajuster le cadre, « Insérer » |
 | Effacer ou noircir une zone | « Caviarder », tracer un rectangle, puis « Effacer » ou « Noircir » |
 | Surligner | « Surligner », puis cliquer un texte |
+| Regarder de près | 🔍 active la loupe ; la molette règle le grossissement (1,5× à 6×) |
 | Gérer les pages | au survol d'une page : pivoter, monter, descendre, supprimer |
 | Fusionner / extraire | « Fusionner » ajoute un PDF à la fin ; « Pages » extrait une sélection (`1-3, 5, 8-`) |
 | Alléger le fichier | « Compresser » |

@@ -24,6 +24,8 @@ const state = {
   hits: [],        // occurrences de la dernière recherche
   hitIndex: -1,
   hitQuery: null,
+  lens: false,     // loupe active
+  lensZoom: 2.5,   // facteur de grossissement, réglable à la molette
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -54,6 +56,8 @@ const el = {
   pagesPanel: $('#pages-panel'),
   extractSpec: $('#extract-spec'),
   pagesInfo: $('#pages-info'),
+  lens: $('#lens'),
+  lensBtn: $('#btn-lens'),
   prevHit: $('#btn-prev-hit'),
   nextHit: $('#btn-next-hit'),
   findPosition: $('#find-position'),
@@ -1024,6 +1028,79 @@ $('#btn-replace-all').addEventListener('click', async () => {
   }
 });
 
+/* ------------------------------------------------------------------- loupe */
+
+const LENS_SIZE = 180;                  // diamètre de la loupe, en pixels d'écran
+const LENS_MIN = 1.5, LENS_MAX = 6;
+
+el.lensBtn.addEventListener('click', () => setLens(!state.lens));
+
+function setLens(on) {
+  state.lens = on;
+  el.lensBtn.classList.toggle('active', on);
+  el.viewer.classList.toggle('lens-on', on);
+  el.lens.hidden = true;                // réapparaît au premier mouvement sur une page
+  if (on) toast('Loupe : molette pour régler le grossissement, Échap pour quitter');
+}
+
+el.viewer.addEventListener('mousemove', (e) => {
+  if (!state.lens) return;
+  // Pendant la saisie d'un fragment, la loupe masquerait le texte en train
+  // d'être tapé : on la retire le temps de l'édition.
+  const node = state.editing ? null : e.target.closest('.page');
+  if (node) drawLens(node, e.clientX, e.clientY);
+  else el.lens.hidden = true;
+});
+
+el.viewer.addEventListener('mouseleave', () => { el.lens.hidden = true; });
+
+// La molette règle le grossissement au lieu de faire défiler la page.
+el.viewer.addEventListener('wheel', (e) => {
+  if (!state.lens) return;
+  const node = e.target.closest('.page');
+  if (!node) return;
+  e.preventDefault();
+  const factor = state.lensZoom * (e.deltaY < 0 ? 1.12 : 1 / 1.12);
+  state.lensZoom = Math.min(LENS_MAX, Math.max(LENS_MIN, Math.round(factor * 100) / 100));
+  drawLens(node, e.clientX, e.clientY);
+}, { passive: false });
+
+/** Place le disque sous le curseur et recadre l'image de la page derrière lui. */
+function drawLens(node, clientX, clientY) {
+  const img = node.querySelector('img');
+  if (!img || !img.complete || !img.naturalWidth) return;
+  const rect = img.getBoundingClientRect();
+  const half = LENS_SIZE / 2;
+  const f = state.lensZoom;
+  // Le point visé doit se retrouver au centre du disque : on décale donc le
+  // fond agrandi de la position du curseur, elle-même multipliée par f.
+  const x = (clientX - rect.left) * f;
+  const y = (clientY - rect.top) * f;
+
+  el.lens.hidden = false;
+  el.lens.style.left = `${clientX - half}px`;
+  el.lens.style.top = `${clientY - half}px`;
+  el.lens.style.backgroundImage = `url("${hiResSrc(node) || img.src}")`;
+  el.lens.style.backgroundSize = `${rect.width * f}px ${rect.height * f}px`;
+  el.lens.style.backgroundPosition = `${half - x}px ${half - y}px`;
+}
+
+/** Rendu à 4× de la page, chargé à la demande.
+ *  L'image d'affichage n'a que 2× de détail : au-delà, la loupe grossirait du
+ *  flou, précisément là où l'on veut voir net. Le premier passage sur une page
+ *  utilise donc l'image courante, puis bascule sur la version fine une fois
+ *  celle-ci arrivée. */
+function hiResSrc(node) {
+  const wanted = `/api/${state.docId}/page/${node.dataset.page}.png?scale=4&v=${state.version}`;
+  if (node._hiResSrc === wanted) return node._hiResReady ? wanted : null;
+  node._hiResSrc = wanted;
+  node._hiResReady = false;
+  const probe = new Image();
+  probe.onload = () => { if (node._hiResSrc === wanted) node._hiResReady = true; };
+  probe.src = wanted;
+  return null;
+}
+
 /* --------------------------------------------------- annuler / zoom / export */
 
 el.undo.addEventListener('click', () => history('undo'));
@@ -1100,6 +1177,7 @@ $('#btn-close').addEventListener('click', async () => {
   toggleFind(false);
   togglePages(false);
   setMode(null);
+  setLens(false);
   resetSearch();
   try { await fetch(`/api/${id}`, { method: 'DELETE' }); } catch (_) { /* sans importance */ }
 });
@@ -1110,8 +1188,9 @@ document.addEventListener('keydown', (e) => {
   // Échap quitte le mode en cours ; l'édition d'un fragment gère sa propre
   // touche Échap, on ne lui marche donc pas dessus.
   const inMode = state.adding || state.highlighting || state.redacting || state.placing;
-  if (e.key === 'Escape' && !state.editing && inMode) {
-    setMode(null);
+  if (e.key === 'Escape' && !state.editing && (inMode || state.lens)) {
+    if (inMode) setMode(null);
+    if (state.lens) setLens(false);
     return;
   }
   const mod = e.metaKey || e.ctrlKey;

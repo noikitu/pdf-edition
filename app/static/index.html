@@ -26,8 +26,14 @@
     <button id="btn-zoom-in" title="Zoomer">+</button>
     <span class="sep"></span>
     <button id="btn-add" title="Ajouter un texte">＋ Texte</button>
+    <button id="btn-highlight" title="Surligner un texte">🖍 Surligner</button>
     <button id="btn-find" title="Rechercher et remplacer (Ctrl+F)">Remplacer</button>
+    <button id="btn-pages" title="Extraire des pages">⌸ Pages</button>
     <button id="btn-compress" title="Réduire le poids du PDF">🍋 Compresser</button>
+    <label class="merge-btn" id="btn-merge" title="Ajouter les pages d'un autre PDF">
+      ⧉ Fusionner
+      <input id="merge-input" type="file" accept="application/pdf,.pdf" hidden>
+    </label>
   </div>
 
   <div class="spacer"></div>
@@ -46,9 +52,20 @@
   <label>Rechercher <input id="find-search" type="text" placeholder="texte à corriger"></label>
   <label>Remplacer par <input id="find-replace" type="text" placeholder="texte corrigé"></label>
   <label class="check"><input id="find-case" type="checkbox"> Respecter la casse</label>
-  <button id="btn-count">Compter</button>
+  <button id="btn-count">Rechercher</button>
+  <span class="find-nav">
+    <button id="btn-prev-hit" title="Occurrence précédente (Maj+Entrée)" disabled>◀</button>
+    <span id="find-position">—</span>
+    <button id="btn-next-hit" title="Occurrence suivante (Entrée)" disabled>▶</button>
+  </span>
   <button id="btn-replace-all" class="primary">Tout remplacer</button>
   <span id="find-info"></span>
+</div>
+
+<div id="pages-panel" class="panel" hidden>
+  <label>Extraire les pages <input id="extract-spec" type="text" placeholder="ex. 1-3, 5, 8-"></label>
+  <button id="btn-extract" class="primary">Extraire en PDF</button>
+  <span id="pages-info"></span>
 </div>
 
 <main id="main">

@@ -79,6 +79,19 @@ class ReplacePayload(BaseModel):
     case_sensitive: bool = False
 
 
+class HighlightPayload(BaseModel):
+    id: str
+    original: Optional[str] = None
+
+
+class RotatePayload(BaseModel):
+    delta: int = 90
+
+
+class MovePayload(BaseModel):
+    offset: int = -1   # -1 monte la page, +1 la descend
+
+
 # --------------------------------------------------------------------------
 # Routes
 # --------------------------------------------------------------------------
@@ -207,7 +220,126 @@ def replace(doc_id: str, payload: ReplacePayload) -> dict:
 @app.get("/api/{doc_id}/search")
 def search(doc_id: str, q: str, case_sensitive: bool = False) -> dict:
     session = _session(doc_id)
-    return {"count": pdf_ops.count_matches(session.doc, q, case_sensitive)}
+    hits = pdf_ops.find_occurrences(session.doc, q, case_sensitive)
+    return {
+        "count": pdf_ops.count_matches(session.doc, q, case_sensitive),
+        "hits": hits,
+    }
+
+
+@app.post("/api/{doc_id}/highlight")
+def highlight(doc_id: str, payload: HighlightPayload) -> dict:
+    session = _session(doc_id)
+    resolved, unresolved = pdf_ops.resolve_edits(
+        session.doc,
+        # `resolve_edits` sert ici uniquement à retrouver le fragment visé, y
+        # compris si les index ont bougé ; le texte reste celui d'origine.
+        [{"id": payload.id, "text": payload.original or "", "original": payload.original}],
+    )
+    if not resolved:
+        raise HTTPException(409, "Texte introuvable : la page a été rechargée, réessayez.")
+
+    item_id = next(iter(resolved))
+    pno = int(item_id.split("-", 1)[0])
+    item = next((i for i in pdf_ops.extract_items(session.doc, pno) if i.id == item_id), None)
+    if item is None:
+        raise HTTPException(409, "Texte introuvable : la page a été rechargée, réessayez.")
+
+    session.snapshot()
+    pdf_ops.highlight_item(session.doc, item)
+    session.version += 1
+    return {"highlighted": 1, **_state(session)}
+
+
+@app.delete("/api/{doc_id}/page/{pno}/highlights")
+def remove_highlights(doc_id: str, pno: int) -> dict:
+    session = _session(doc_id)
+    if not 0 <= pno < session.doc.page_count:
+        raise HTTPException(404, "Page inexistante.")
+    session.snapshot()
+    removed = pdf_ops.clear_highlights(session.doc, pno)
+    if removed:
+        session.version += 1
+    else:
+        session.undo_stack.pop()
+    return {"removed": removed, **_state(session)}
+
+
+# --------------------------------------------------------------------------
+# Pages : pivoter, supprimer, réordonner, extraire, fusionner
+# --------------------------------------------------------------------------
+
+@app.post("/api/{doc_id}/page/{pno}/rotate")
+def rotate(doc_id: str, pno: int, payload: RotatePayload) -> dict:
+    session = _session(doc_id)
+    if not 0 <= pno < session.doc.page_count:
+        raise HTTPException(404, "Page inexistante.")
+    session.snapshot()
+    pdf_ops.rotate_page(session.doc, pno, payload.delta)
+    session.version += 1
+    return {"page": pno, **_state(session)}
+
+
+@app.delete("/api/{doc_id}/page/{pno}")
+def remove_page(doc_id: str, pno: int) -> dict:
+    session = _session(doc_id)
+    if not 0 <= pno < session.doc.page_count:
+        raise HTTPException(404, "Page inexistante.")
+    if session.doc.page_count == 1:
+        raise HTTPException(400, "Impossible de supprimer la dernière page du document.")
+    session.snapshot()
+    pdf_ops.delete_page(session.doc, pno)
+    session.version += 1
+    return {"deleted": pno, **_state(session)}
+
+
+@app.post("/api/{doc_id}/page/{pno}/move")
+def reorder_page(doc_id: str, pno: int, payload: MovePayload) -> dict:
+    session = _session(doc_id)
+    if not 0 <= pno < session.doc.page_count:
+        raise HTTPException(404, "Page inexistante.")
+    session.snapshot()
+    position = pdf_ops.move_page(session.doc, pno, payload.offset)
+    if position != pno:
+        session.version += 1
+    else:
+        session.undo_stack.pop()
+    return {"page": position, **_state(session)}
+
+
+@app.get("/api/{doc_id}/extract")
+def extract(doc_id: str, pages: str) -> StreamingResponse:
+    session = _session(doc_id)
+    numbers = pdf_ops.parse_page_spec(pages, session.doc.page_count)
+    if not numbers:
+        raise HTTPException(400, "Aucune page valide dans la sélection.")
+    data = pdf_ops.extract_pages(session.doc, numbers)
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "_", Path(session.name).stem) or "document"
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{stem}-extrait.pdf"'},
+    )
+
+
+@app.post("/api/{doc_id}/merge")
+async def merge(doc_id: str, file: UploadFile = File(...)) -> dict:
+    session = _session(doc_id)
+    data = await file.read()
+    if not data:
+        raise HTTPException(400, "Fichier vide.")
+    if len(data) > MAX_UPLOAD_MB * 1024 * 1024:
+        raise HTTPException(413, f"Fichier trop volumineux (max {MAX_UPLOAD_MB} Mo).")
+    if not data.lstrip()[:5].startswith(b"%PDF"):
+        raise HTTPException(400, "Ce fichier n'est pas un PDF.")
+    session.snapshot()
+    try:
+        added = pdf_ops.merge_pdf(session.doc, data)
+    except Exception as exc:
+        session.undo_stack.pop()
+        raise HTTPException(400, f"Fusion impossible : {exc}") from exc
+    session.version += 1
+    return {"added": added, **_state(session)}
 
 
 @app.post("/api/{doc_id}/undo")

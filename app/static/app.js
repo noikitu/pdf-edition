@@ -14,9 +14,13 @@ const state = {
   version: 0,
   zoom: 1,
   adding: false,
+  highlighting: false,
   editing: null,   // élément .tf en cours d'édition
   fonts: [],       // polices proposées par le serveur
   style: null,     // barre de style ouverte sur le fragment en cours
+  hits: [],        // occurrences de la dernière recherche
+  hitIndex: -1,
+  hitQuery: null,
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -40,6 +44,14 @@ const el = {
   overlayText: $('#overlay-text'),
   toast: $('#toast'),
   compress: $('#btn-compress'),
+  highlight: $('#btn-highlight'),
+  mergeInput: $('#merge-input'),
+  pagesPanel: $('#pages-panel'),
+  extractSpec: $('#extract-spec'),
+  pagesInfo: $('#pages-info'),
+  prevHit: $('#btn-prev-hit'),
+  nextHit: $('#btn-next-hit'),
+  findPosition: $('#find-position'),
 };
 
 /* ------------------------------------------------------------------ utils */
@@ -171,12 +183,44 @@ function buildPages() {
     badge.textContent = `${page.number + 1} / ${state.pages.length}`;
     node.appendChild(badge);
 
+    node.appendChild(buildPageTools(page.number));
+
     node.addEventListener('mousedown', onPageMouseDown);
     el.viewer.appendChild(node);
     observer.observe(node);
   });
   // Les premières pages sont chargées sans attendre l'observateur.
   [...el.viewer.children].slice(0, 3).forEach(loadPage);
+}
+
+/** Barre d'actions affichée au survol d'une page. */
+function buildPageTools(pno) {
+  const tools = document.createElement('div');
+  tools.className = 'page-tools';
+
+  const actions = [
+    ['↺', 'Pivoter à gauche', () => rotatePage(pno, -90)],
+    ['↻', 'Pivoter à droite', () => rotatePage(pno, 90)],
+    ['↑', 'Monter la page', () => movePage(pno, -1)],
+    ['↓', 'Descendre la page', () => movePage(pno, 1)],
+    ['🖍✕', 'Retirer les surlignages', () => clearHighlights(pno)],
+    ['🗑', 'Supprimer la page', () => deletePage(pno)],
+  ];
+
+  actions.forEach(([label, title, handler], index) => {
+    const button = document.createElement('button');
+    button.textContent = label;
+    button.title = title;
+    if (index === actions.length - 1) button.classList.add('danger');
+    if (label === '↑') button.disabled = pno === 0;
+    if (label === '↓') button.disabled = pno === state.pages.length - 1;
+    button.addEventListener('click', (e) => { e.stopPropagation(); handler(); });
+    tools.appendChild(button);
+  });
+
+  // Un mousedown sur la barre ne doit pas être pris pour un clic « ajouter du texte ».
+  tools.addEventListener('mousedown', (e) => e.stopPropagation());
+  return tools;
 }
 
 const pageNode = (pno) => el.viewer.querySelector(`.page[data-page="${pno}"]`);
@@ -237,7 +281,11 @@ function drawLayer(node, items) {
     div.style.fontStyle = item.italic ? 'italic' : 'normal';
     div.style.setProperty('--tf-color', item.color);
 
-    div.addEventListener('click', (e) => { e.stopPropagation(); startEdit(div, node); });
+    div.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (state.highlighting) highlightFragment(div);
+      else startEdit(div, node);
+    });
     layer.appendChild(div);
   });
 }
@@ -446,10 +494,134 @@ function refreshAll() {
 /* ------------------------------------------------------------ ajout de texte */
 
 $('#btn-add').addEventListener('click', () => {
-  state.adding = !state.adding;
+  setMode(state.adding ? null : 'adding');
+});
+
+/* --------------------------------------------------------------- surlignage */
+
+el.highlight.addEventListener('click', () => {
+  setMode(state.highlighting ? null : 'highlighting');
+});
+
+/** Les modes « ajouter du texte » et « surligner » s'excluent l'un l'autre. */
+function setMode(mode) {
+  state.adding = mode === 'adding';
+  state.highlighting = mode === 'highlighting';
   $('#btn-add').classList.toggle('active', state.adding);
-  el.viewer.querySelectorAll('.page').forEach((n) => n.classList.toggle('adding', state.adding));
+  el.highlight.classList.toggle('active', state.highlighting);
+  el.viewer.querySelectorAll('.page').forEach((n) => {
+    n.classList.toggle('adding', state.adding);
+    n.classList.toggle('highlighting', state.highlighting);
+  });
   if (state.adding) toast('Cliquez à l’endroit où placer le texte');
+  if (state.highlighting) toast('Cliquez un texte pour le surligner');
+}
+
+async function highlightFragment(div) {
+  const node = pageNode(+div.dataset.id.split('-')[0]);
+  busy(true, 'Surlignage…');
+  try {
+    const data = await postJSON(`/api/${state.docId}/highlight`, {
+      id: div.dataset.id,
+      original: div.dataset.original,
+    });
+    applyState(data);
+    if (node) await refreshPage(node);
+    toast('Texte surligné');
+  } catch (err) {
+    toast(err.message, true);
+  } finally {
+    busy(false);
+  }
+}
+
+async function clearHighlights(pno) {
+  busy(true, 'Retrait des surlignages…');
+  try {
+    const data = await api(`/api/${state.docId}/page/${pno}/highlights`, { method: 'DELETE' });
+    applyState(data);
+    const node = pageNode(pno);
+    if (node) await refreshPage(node);
+    toast(data.removed ? `${data.removed} surlignage(s) retiré(s)` : 'Aucun surlignage sur cette page');
+  } catch (err) {
+    toast(err.message, true);
+  } finally {
+    busy(false);
+  }
+}
+
+/* ------------------------------------------------------- pages : opérations */
+
+/** Les opérations de page changent la structure du document : on rebâtit la vue. */
+async function pageOperation(label, request) {
+  busy(true, label);
+  try {
+    const data = await request();
+    applyState(data);
+    resetSearch();
+    buildPages();
+    return data;
+  } catch (err) {
+    toast(err.message, true);
+    return null;
+  } finally {
+    busy(false);
+  }
+}
+
+async function rotatePage(pno, delta) {
+  const data = await pageOperation('Rotation…', () =>
+    postJSON(`/api/${state.docId}/page/${pno}/rotate`, { delta }));
+  if (data) toast('Page pivotée');
+}
+
+async function movePage(pno, offset) {
+  const data = await pageOperation('Déplacement…', () =>
+    postJSON(`/api/${state.docId}/page/${pno}/move`, { offset }));
+  if (data) toast(`Page déplacée en position ${data.page + 1}`);
+}
+
+async function deletePage(pno) {
+  if (!confirm(`Supprimer la page ${pno + 1} ?`)) return;
+  const data = await pageOperation('Suppression…', () =>
+    api(`/api/${state.docId}/page/${pno}`, { method: 'DELETE' }));
+  if (data) toast('Page supprimée');
+}
+
+/** Une recherche devient obsolète dès que la pagination change. */
+function resetSearch() {
+  state.hits = [];
+  state.hitIndex = -1;
+  state.hitQuery = null;
+  updateHitNav();
+}
+
+/* ------------------------------------------------------------------ fusion */
+
+el.mergeInput.addEventListener('change', async () => {
+  const file = el.mergeInput.files[0];
+  el.mergeInput.value = '';
+  if (!file) return;
+  const form = new FormData();
+  form.append('file', file);
+  const data = await pageOperation('Fusion…', () =>
+    api(`/api/${state.docId}/merge`, { method: 'POST', body: form }));
+  if (data) toast(`${data.added} page(s) ajoutée(s)`);
+});
+
+/* --------------------------------------------------------- extraction pages */
+
+$('#btn-pages').addEventListener('click', () => togglePages());
+
+$('#btn-extract').addEventListener('click', () => {
+  const spec = el.extractSpec.value.trim();
+  if (!spec) return toast('Indiquez les pages à extraire, par exemple 1-3, 5.', true);
+  el.pagesInfo.textContent = '';
+  window.location.href = `/api/${state.docId}/extract?pages=${encodeURIComponent(spec)}`;
+});
+
+el.extractSpec.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); $('#btn-extract').click(); }
 });
 
 function onPageMouseDown(e) {
@@ -522,22 +694,85 @@ function toggleFind(force) {
   const show = force !== undefined ? force : el.findPanel.hidden;
   el.findPanel.hidden = !show;
   $('#btn-find').classList.toggle('active', show);
+  // Les deux panneaux sont collés au même endroit sous la barre : un seul à la fois.
+  if (show) togglePages(false);
   if (show) el.findSearch.focus();
 }
 
-$('#btn-count').addEventListener('click', async () => {
+function togglePages(force) {
+  const show = force !== undefined ? force : el.pagesPanel.hidden;
+  el.pagesPanel.hidden = !show;
+  $('#btn-pages').classList.toggle('active', show);
+  if (show) toggleFind(false);
+  if (show) el.extractSpec.focus();
+}
+
+$('#btn-count').addEventListener('click', runSearch);
+el.prevHit.addEventListener('click', () => gotoHit(-1));
+el.nextHit.addEventListener('click', () => gotoHit(1));
+
+el.findSearch.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  // Entrée relance la recherche si le terme a changé, sinon avance d'une occurrence.
+  if (state.hits.length && el.findSearch.value === state.hitQuery) gotoHit(e.shiftKey ? -1 : 1);
+  else runSearch();
+});
+
+async function runSearch() {
   const q = el.findSearch.value;
   if (!q) return;
   busy(true, 'Recherche…');
   try {
-    const data = await api(`/api/${state.docId}/search?q=${encodeURIComponent(q)}&case_sensitive=${el.findCase.checked}`);
+    const data = await api(
+      `/api/${state.docId}/search?q=${encodeURIComponent(q)}&case_sensitive=${el.findCase.checked}`
+    );
+    state.hits = data.hits || [];
+    state.hitQuery = q;
+    state.hitIndex = -1;
     el.findInfo.textContent = `${data.count} occurrence(s)`;
+    updateHitNav();
+    if (state.hits.length) gotoHit(1);
   } catch (err) {
     toast(err.message, true);
   } finally {
     busy(false);
   }
-});
+}
+
+function updateHitNav() {
+  const total = state.hits.length;
+  el.prevHit.disabled = total === 0;
+  el.nextHit.disabled = total === 0;
+  el.findPosition.textContent = total ? `${state.hitIndex + 1} / ${total}` : '—';
+}
+
+/** Fait défiler jusqu'à l'occurrence suivante (ou précédente) et la fait clignoter. */
+async function gotoHit(step) {
+  const total = state.hits.length;
+  if (!total) return;
+  state.hitIndex = (state.hitIndex + step + total) % total;
+  updateHitNav();
+
+  const hit = state.hits[state.hitIndex];
+  const node = pageNode(hit.page);
+  if (!node) return;
+  await loadPage(node);
+
+  const [x0, y0, x1, y1] = hit.bbox;
+  const z = state.zoom;
+  node.querySelectorAll('.find-hit').forEach((n) => n.remove());
+  const mark = document.createElement('div');
+  mark.className = 'find-hit';
+  mark.style.left = `${x0 * z}px`;
+  mark.style.top = `${y0 * z}px`;
+  mark.style.width = `${(x1 - x0) * z}px`;
+  mark.style.height = `${(y1 - y0) * z}px`;
+  mark.addEventListener('animationend', () => mark.remove());
+  node.appendChild(mark);
+
+  node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
 
 $('#btn-replace-all').addEventListener('click', async () => {
   const search = el.findSearch.value;
@@ -635,12 +870,21 @@ $('#btn-close').addEventListener('click', async () => {
   el.docTools.hidden = true;
   el.docActions.hidden = true;
   toggleFind(false);
+  togglePages(false);
+  setMode(null);
+  resetSearch();
   try { await fetch(`/api/${id}`, { method: 'DELETE' }); } catch (_) { /* sans importance */ }
 });
 
 /* -------------------------------------------------------------- raccourcis */
 
 document.addEventListener('keydown', (e) => {
+  // Échap quitte le mode « ajouter » ou « surligner » ; l'édition d'un fragment
+  // gère sa propre touche Échap, on ne lui marche donc pas dessus.
+  if (e.key === 'Escape' && !state.editing && (state.adding || state.highlighting)) {
+    setMode(null);
+    return;
+  }
   const mod = e.metaKey || e.ctrlKey;
   if (!mod || !state.docId) return;
   if (e.key === 'z' && !e.shiftKey) { e.preventDefault(); history('undo'); }

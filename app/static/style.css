@@ -230,7 +230,33 @@ button.active {
   box-shadow: 0 0 0 2px rgba(255, 233, 0, .5);
   background: #fff;
 }
-#find-info { font-size: 13px; color: var(--muted); padding-bottom: 9px; }
+#find-info, #pages-info { font-size: 13px; color: var(--muted); padding-bottom: 9px; }
+
+.find-nav { display: flex; align-items: center; gap: 4px; }
+.find-nav button { padding: 8px 10px; font-size: 12px; }
+#find-position {
+  font: 400 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--muted);
+  min-width: 54px;
+  text-align: center;
+}
+
+/* le bouton Fusionner est un <label> : il doit imiter les vrais boutons */
+.merge-btn {
+  display: inline-block;
+  font: 500 13px/1 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  color: var(--ink);
+  background: rgba(255, 255, 255, .55);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, .8);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .95), 0 3px 8px rgba(0, 0, 0, .07);
+  border-radius: var(--r-btn);
+  padding: 9px 13px;
+  cursor: pointer;
+  transition: background .14s;
+}
+.merge-btn:hover { background: rgba(255, 255, 255, .8); }
 
 /* ------------------------------------------------------------ dépôt fichier */
 
@@ -379,6 +405,60 @@ button.active {
 
 .page.adding { cursor: crosshair; }
 .page.adding .tf { pointer-events: none; }
+
+/* mode surlignage : le curseur annonce qu'un clic surligne au lieu d'éditer */
+.page.highlighting .tf { cursor: pointer; }
+.page.highlighting .tf:hover {
+  background: rgba(255, 235, 90, .55);
+  box-shadow: inset 0 0 0 1px rgba(214, 180, 0, .7);
+}
+
+/* ------------------------------------------------------- contrôles de page */
+
+.page-tools {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 6;
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 10px;
+  opacity: 0;
+  transition: opacity .14s;
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: var(--glass-border);
+  box-shadow: var(--glass-shadow);
+}
+.page:hover .page-tools, .page-tools:focus-within { opacity: 1; }
+.page-tools button {
+  padding: 5px 8px;
+  font-size: 12px;
+  line-height: 1.2;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, .75);
+  border: none;
+  box-shadow: none;
+}
+.page-tools button:hover:not(:disabled) { background: #fff; }
+.page-tools .danger { color: #a3231a; }
+
+/* occurrence de recherche mise en évidence le temps d'un saut */
+.find-hit {
+  position: absolute;
+  z-index: 4;
+  border-radius: 3px;
+  pointer-events: none;
+  background: rgba(255, 220, 0, .45);
+  box-shadow: 0 0 0 2px rgba(255, 200, 0, .8);
+  animation: find-pulse 1.6s ease-out forwards;
+}
+@keyframes find-pulse {
+  0%, 60% { opacity: 1; }
+  100% { opacity: 0; }
+}
 
 /* --------------------------------------------------- barre de choix police */
 

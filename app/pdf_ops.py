@@ -519,3 +519,134 @@ def count_matches(doc: fitz.Document, search: str, case_sensitive: bool) -> int:
             hay = item.text if case_sensitive else item.text.lower()
             total += hay.count(needle)
     return total
+
+
+def find_occurrences(
+    doc: fitz.Document, search: str, case_sensitive: bool
+) -> list[dict]:
+    """Localise chaque occurrence de `search`, pour pouvoir sauter de l'une à l'autre.
+
+    `Page.search_for` ignore la casse et ne sait pas la respecter ; quand
+    l'utilisateur la demande, on relit donc le texte sous chaque rectangle
+    trouvé pour ne garder que les correspondances exactes.
+    """
+    if not search:
+        return []
+    hits: list[dict] = []
+    for pno in range(doc.page_count):
+        page = doc[pno]
+        try:
+            rects = page.search_for(search)
+        except Exception:
+            continue
+        for rect in rects:
+            if case_sensitive and search not in page.get_textbox(rect):
+                continue
+            hits.append({
+                "page": pno,
+                "bbox": [round(v, 2) for v in (rect.x0, rect.y0, rect.x1, rect.y1)],
+            })
+    return hits
+
+
+# --------------------------------------------------------------------------
+# Surlignage
+# --------------------------------------------------------------------------
+
+HIGHLIGHT_COLOR = (1, 0.92, 0.35)   # jaune citron, cohérent avec l'interface
+
+
+def highlight_item(doc: fitz.Document, item: TextItem) -> None:
+    """Pose une vraie annotation de surlignage sur un fragment.
+
+    On passe par une annotation plutôt qu'un rectangle dessiné : elle reste
+    sélectionnable et supprimable dans n'importe quel lecteur PDF, et elle
+    n'altère pas le contenu de la page.
+    """
+    page = doc[item.page]
+    annot = page.add_highlight_annot(fitz.Rect(item.bbox))
+    annot.set_colors(stroke=HIGHLIGHT_COLOR)
+    annot.update()
+
+
+def clear_highlights(doc: fitz.Document, pno: int) -> int:
+    """Retire tous les surlignages d'une page. Renvoie le nombre supprimé."""
+    page = doc[pno]
+    removed = 0
+    for annot in list(page.annots(types=[fitz.PDF_ANNOT_HIGHLIGHT])):
+        page.delete_annot(annot)
+        removed += 1
+    return removed
+
+
+# --------------------------------------------------------------------------
+# Gestion des pages
+# --------------------------------------------------------------------------
+
+def rotate_page(doc: fitz.Document, pno: int, delta: int) -> None:
+    """Pivote une page d'un multiple de 90°, en cumulant avec sa rotation actuelle."""
+    page = doc[pno]
+    page.set_rotation((page.rotation + delta) % 360)
+
+
+def delete_page(doc: fitz.Document, pno: int) -> None:
+    doc.delete_page(pno)
+
+
+def move_page(doc: fitz.Document, pno: int, offset: int) -> int:
+    """Déplace une page d'un cran vers le haut (-1) ou vers le bas (+1).
+
+    Renvoie sa nouvelle position. `move_page` insère *avant* la position
+    donnée : descendre d'un cran revient donc à viser `pno + 2`, la place
+    libérée par le retrait de la page décalant tout ce qui suit.
+    """
+    target = pno + offset
+    if not 0 <= target < doc.page_count:
+        return pno
+    doc.move_page(pno, target if offset < 0 else target + 1)
+    return target
+
+
+def extract_pages(doc: fitz.Document, numbers: list[int]) -> bytes:
+    """Construit un nouveau PDF ne contenant que les pages demandées, dans l'ordre."""
+    out = fitz.open()
+    for pno in numbers:
+        if 0 <= pno < doc.page_count:
+            out.insert_pdf(doc, from_page=pno, to_page=pno)
+    data = out.tobytes(garbage=4, deflate=True, use_objstms=True)
+    out.close()
+    return data
+
+
+def parse_page_spec(spec: str, page_count: int) -> list[int]:
+    """Interprète « 1-3, 5, 8- » en indices de pages (l'utilisateur compte à partir de 1)."""
+    numbers: list[int] = []
+    for chunk in spec.replace(" ", "").split(","):
+        if not chunk:
+            continue
+        if "-" in chunk:
+            start, _, end = chunk.partition("-")
+            first = int(start) if start.isdigit() else 1
+            last = int(end) if end.isdigit() else page_count
+        elif chunk.isdigit():
+            first = last = int(chunk)
+        else:
+            continue
+        for human in range(max(first, 1), min(last, page_count) + 1):
+            index = human - 1
+            if index not in numbers:
+                numbers.append(index)
+    return numbers
+
+
+def merge_pdf(doc: fitz.Document, data: bytes) -> int:
+    """Ajoute à la fin du document les pages d'un autre PDF. Renvoie leur nombre."""
+    other = fitz.open(stream=data, filetype="pdf")
+    try:
+        if other.needs_pass:
+            raise ValueError("Ce PDF est protégé par mot de passe.")
+        added = other.page_count
+        doc.insert_pdf(other)
+        return added
+    finally:
+        other.close()

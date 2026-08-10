@@ -131,34 +131,16 @@
   </svg>
   <span id="overlay-text">Chargement…</span>
 </div>
-<!-- Loupe : les anneaux reprennent tous l'image du disque (background: inherit) avec un
-     grossissement croissant vers le bord, ce qui imite la compression du verre. Les deux
-     « fringe » n'en gardent qu'une partie du spectre, décalée différemment : le rouge est
-     moins dévié que le bleu, d'où la frange colorée au rebord. -->
+<!-- Loupe : chaque anneau reprend l'image du disque (background: inherit) avec un
+     grossissement croissant vers le bord, ce qui imite la compression du verre. -->
 <div id="lens" class="lens" hidden>
   <i class="lens-ring r1"></i>
   <i class="lens-ring r2"></i>
   <i class="lens-ring r3"></i>
   <i class="lens-ring r4"></i>
-  <i class="lens-fringe warm"></i>
-  <i class="lens-fringe cool"></i>
   <i class="lens-caustic"></i>
   <i class="lens-sheen"></i>
 </div>
-
-<svg class="lens-filters" aria-hidden="true" width="0" height="0">
-  <defs>
-    <!-- ne garde que le rouge -->
-    <filter id="lens-warm" color-interpolation-filters="sRGB">
-      <feColorMatrix type="matrix" values="1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0"></feColorMatrix>
-    </filter>
-    <!-- ne garde que le vert et le bleu : superposé au précédent en « screen », le
-         blanc se reconstitue là où les deux coïncident, et frange là où ils divergent -->
-    <filter id="lens-cool" color-interpolation-filters="sRGB">
-      <feColorMatrix type="matrix" values="0 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 1 0"></feColorMatrix>
-    </filter>
-  </defs>
-</svg>
 <div id="toast" class="toast" hidden></div>
 
 <script src="/app.js"></script>

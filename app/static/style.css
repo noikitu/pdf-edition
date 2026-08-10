@@ -568,8 +568,6 @@ button.active {
     0 3px 8px rgba(0, 0, 0, .16);
 }
 
-.lens-filters { position: absolute; width: 0; height: 0; overflow: hidden; }
-
 /* Tous les calques du rebord partagent la même géométrie et la même image que le
    disque : seuls changent le grossissement, le flou, et l'anneau où ils sont visibles. */
 .lens > i {
@@ -583,65 +581,45 @@ button.active {
 /* Anneaux réfractifs. Un seul anneau uniformément agrandi donnerait un bord plat :
    c'est le *gradient* de déplacement — faible au début du rebord, très fort au
    ras du bord — qui donne la sensation d'épaisseur et de matière liquide. */
+/* Le fondu des masques est volontairement long : une transition franche entre
+   deux grossissements dessinerait un cercle net, exactement ce qu'on cherche à
+   éviter. Les quatre anneaux doivent se lire comme une seule courbure continue. */
 .lens-ring {
   background: inherit;
   transform: scale(var(--s));
-  filter: blur(var(--b)) saturate(var(--sat, 1.1));
+  filter: blur(var(--b));
   -webkit-mask: radial-gradient(closest-side,
-    transparent var(--inner), rgba(0, 0, 0, .82) var(--mid), #000 100%);
+    transparent var(--inner), rgba(0, 0, 0, .45) var(--mid), #000 100%);
   mask: radial-gradient(closest-side,
-    transparent var(--inner), rgba(0, 0, 0, .82) var(--mid), #000 100%);
+    transparent var(--inner), rgba(0, 0, 0, .45) var(--mid), #000 100%);
 }
-.lens-ring.r1 { --s: 1.035; --inner: 72%; --mid: 87%; --b: .25px; }
-.lens-ring.r2 { --s: 1.10;  --inner: 83%; --mid: 92%; --b: .5px; }
-.lens-ring.r3 { --s: 1.21;  --inner: 90%; --mid: 95.5%; --b: .9px; --sat: 1.16; }
-/* dernier millimètre : l'image s'y écrase presque complètement */
-.lens-ring.r4 { --s: 1.46;  --inner: 95%; --mid: 97.5%; --b: 1.6px; --sat: 1.22; }
+.lens-ring.r1 { --s: 1.03; --inner: 66%; --mid: 86%; --b: .2px; }
+.lens-ring.r2 { --s: 1.08; --inner: 80%; --mid: 92%; --b: .45px; }
+.lens-ring.r3 { --s: 1.15; --inner: 89%; --mid: 96%; --b: .8px; }
+/* dernier millimètre : l'image s'y comprime le plus fort */
+.lens-ring.r4 { --s: 1.26; --inner: 95%; --mid: 98.5%; --b: 1.3px; }
 
-/* Dispersion : le rouge est moins dévié que le bleu, donc moins agrandi. Les deux
-   calques se recomposent en blanc au milieu du rebord et laissent une frange
-   chaude d'un côté, froide de l'autre, exactement comme au bord d'une lentille. */
-.lens-fringe {
-  background: inherit;
-  mix-blend-mode: screen;
-  -webkit-mask: radial-gradient(closest-side, transparent 94%, #000 99%);
-  mask: radial-gradient(closest-side, transparent 94%, #000 99%);
-}
-.lens-fringe.warm {
-  transform: scale(1.42);
-  filter: url(#lens-warm) blur(1.3px);
-  opacity: .5;
-}
-.lens-fringe.cool {
-  transform: scale(1.52);
-  filter: url(#lens-cool) blur(1.7px);
-  opacity: .42;
-}
-
-/* Caustique : la lumière traversant le verre se concentre en un croissant vif
-   juste à l'intérieur du rebord. Sa lente dérive autour du disque est ce qui
-   fait « couler » la matière. */
+/* Caustique : la lumière traversant le verre se concentre en un croissant clair
+   juste à l'intérieur du rebord. Sa lente dérive autour du disque est ce qui fait
+   « couler » la matière — d'où une intensité faible, elle doit se sentir plus
+   qu'elle ne se voit. */
 .lens-caustic {
   background:
-    radial-gradient(34% 24% at 70% 80%, rgba(255, 255, 255, .95), rgba(255, 255, 255, 0) 72%),
-    radial-gradient(22% 16% at 26% 76%, rgba(255, 252, 214, .6), rgba(255, 255, 255, 0) 74%);
+    radial-gradient(38% 26% at 70% 80%, rgba(255, 255, 255, .5), rgba(255, 255, 255, 0) 74%),
+    radial-gradient(26% 18% at 28% 74%, rgba(255, 255, 255, .28), rgba(255, 255, 255, 0) 76%);
   mix-blend-mode: screen;
-  -webkit-mask: radial-gradient(closest-side, transparent 76%, #000 92%);
-  mask: radial-gradient(closest-side, transparent 76%, #000 92%);
+  -webkit-mask: radial-gradient(closest-side, transparent 74%, #000 94%);
+  mask: radial-gradient(closest-side, transparent 74%, #000 94%);
   animation: lens-liquid 6s ease-in-out infinite;
 }
 
-/* Reflets de surface : bandeau spéculaire en haut à gauche, rebond diffus en bas
-   à droite, et assombrissement progressif du pourtour. */
+/* Reflets de surface : bandeau spéculaire en haut à gauche, et assombrissement
+   progressif du pourtour qui referme le volume. */
 .lens-sheen {
   background:
-    radial-gradient(36% 24% at 30% 18%, rgba(255, 255, 255, .95), rgba(255, 255, 255, 0) 70%),
-    radial-gradient(18% 12% at 20% 30%, rgba(255, 255, 255, .8), rgba(255, 255, 255, 0) 76%),
-    radial-gradient(closest-side, rgba(0, 0, 0, 0) 68%, rgba(28, 28, 18, .2) 100%);
-  box-shadow:
-    inset 0 0 7px 1px rgba(255, 248, 190, .3),
-    inset 3px 3px 6px rgba(150, 195, 255, .2),
-    inset -3px -3px 6px rgba(255, 205, 150, .2);
+    radial-gradient(34% 22% at 30% 18%, rgba(255, 255, 255, .8), rgba(255, 255, 255, 0) 72%),
+    radial-gradient(16% 11% at 21% 31%, rgba(255, 255, 255, .6), rgba(255, 255, 255, 0) 78%),
+    radial-gradient(closest-side, rgba(0, 0, 0, 0) 72%, rgba(28, 28, 18, .16) 100%);
   animation: lens-sheen-drift 6s ease-in-out infinite;
 }
 

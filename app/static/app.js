@@ -1078,8 +1078,7 @@ function drawLens(node, clientX, clientY) {
   const y = (clientY - rect.top) * f;
 
   el.lens.hidden = false;
-  el.lens.style.left = `${clientX - half}px`;
-  el.lens.style.top = `${clientY - half}px`;
+  el.lens.style.transform = `translate3d(${clientX - half}px, ${clientY - half}px, 0)`;
   el.lens.style.backgroundImage = `url("${hiResSrc(node) || img.src}")`;
   el.lens.style.backgroundSize = `${rect.width * f}px ${rect.height * f}px`;
   el.lens.style.backgroundPosition = `${half - x}px ${half - y}px`;

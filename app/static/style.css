@@ -560,7 +560,7 @@ button.active {
     /* biseau interne : ombre au nord-ouest, lumière au sud-est, comme un ménisque */
     inset 0 2px 3px rgba(0, 0, 0, .22),
     inset 0 -2px 4px rgba(255, 255, 255, .8),
-    inset 0 0 0 1px rgba(255, 255, 255, .55),
+    inset 0 0 0 1px rgba(255, 255, 255, .3),
     /* liseré du verre puis ombre portée sur la page */
     0 0 0 1px rgba(120, 120, 100, .28),
     0 0 0 3px rgba(255, 255, 255, .5),
@@ -581,23 +581,29 @@ button.active {
 /* Anneaux réfractifs. Un seul anneau uniformément agrandi donnerait un bord plat :
    c'est le *gradient* de déplacement — faible au début du rebord, très fort au
    ras du bord — qui donne la sensation d'épaisseur et de matière liquide. */
-/* Le fondu des masques est volontairement long : une transition franche entre
-   deux grossissements dessinerait un cercle net, exactement ce qu'on cherche à
-   éviter. Les quatre anneaux doivent se lire comme une seule courbure continue. */
+/* Aucun anneau ne doit être visible en tant que tel : ce sont les paliers de
+   grossissement qui trahissent l'empilement. D'où six couches aux écarts faibles,
+   et surtout des masques au fondu très long et largement chevauchants — chaque
+   couche a déjà commencé à apparaître bien avant que la précédente ne soit
+   pleinement opaque, si bien que la courbure se lit comme continue. */
 .lens-ring {
   background: inherit;
   transform: scale(var(--s));
   filter: blur(var(--b));
+  /* montée d'opacité concave : presque rien sur la première moitié du fondu,
+     l'essentiel dans le dernier tiers, là où le verre courbe vraiment */
   -webkit-mask: radial-gradient(closest-side,
-    transparent var(--inner), rgba(0, 0, 0, .45) var(--mid), #000 100%);
+    transparent var(--inner), rgba(0, 0, 0, .1) var(--mid), rgba(0, 0, 0, .45) var(--out), #000 100%);
   mask: radial-gradient(closest-side,
-    transparent var(--inner), rgba(0, 0, 0, .45) var(--mid), #000 100%);
+    transparent var(--inner), rgba(0, 0, 0, .1) var(--mid), rgba(0, 0, 0, .45) var(--out), #000 100%);
 }
-.lens-ring.r1 { --s: 1.03; --inner: 66%; --mid: 86%; --b: .2px; }
-.lens-ring.r2 { --s: 1.08; --inner: 80%; --mid: 92%; --b: .45px; }
-.lens-ring.r3 { --s: 1.15; --inner: 89%; --mid: 96%; --b: .8px; }
+.lens-ring.r1 { --s: 1.015; --inner: 42%; --mid: 68%; --out: 86%; --b: .1px; }
+.lens-ring.r2 { --s: 1.04;  --inner: 58%; --mid: 78%; --out: 90%; --b: .2px; }
+.lens-ring.r3 { --s: 1.075; --inner: 70%; --mid: 85%; --out: 93%; --b: .35px; }
+.lens-ring.r4 { --s: 1.12;  --inner: 80%; --mid: 90%; --out: 96%; --b: .55px; }
+.lens-ring.r5 { --s: 1.19;  --inner: 88%; --mid: 94%; --out: 98%; --b: .85px; }
 /* dernier millimètre : l'image s'y comprime le plus fort */
-.lens-ring.r4 { --s: 1.26; --inner: 95%; --mid: 98.5%; --b: 1.3px; }
+.lens-ring.r6 { --s: 1.30;  --inner: 94%; --mid: 97%; --out: 99%; --b: 1.3px; }
 
 /* Caustique : la lumière traversant le verre se concentre en un croissant clair
    juste à l'intérieur du rebord. Sa lente dérive autour du disque est ce qui fait

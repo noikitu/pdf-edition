@@ -464,6 +464,50 @@ def add_textbox(
             _write_line(page, fitz.Point(x, y + size * (i + 1)), line, font, size, color)
 
 
+def insert_image(
+    doc: fitz.Document, pno: int, x: float, y: float, width: float, height: float, data: bytes
+) -> tuple[float, float, float, float]:
+    """Pose une image (logo, tampon, signature scannée) sur une page.
+
+    (x, y) est le coin haut-gauche, en points PDF. Le rectangle est ramené dans
+    la page si l'utilisateur a débordé, et les proportions de l'image sont
+    conservées : elle est centrée dans le cadre demandé. Renvoie le rectangle
+    réellement utilisé.
+    """
+    page = doc[pno]
+    rect = fitz.Rect(x, y, x + max(width, 1.0), y + max(height, 1.0)) & page.rect
+    if rect.is_empty or rect.width < 1 or rect.height < 1:
+        raise ValueError("L'emplacement demandé est en dehors de la page.")
+    # `keep_proportion` évite d'étirer une signature ; MuPDF lit lui-même le
+    # format de l'image (PNG, JPEG, GIF, BMP, TIFF…) et lève si elle est illisible.
+    page.insert_image(rect, stream=data, keep_proportion=True)
+    return (rect.x0, rect.y0, rect.x1, rect.y1)
+
+
+def redact_area(
+    doc: fitz.Document, pno: int, x0: float, y0: float, x1: float, y1: float, blackout: bool
+) -> bool:
+    """Caviarde une zone rectangulaire : le contenu est retiré, pas seulement masqué.
+
+    `blackout` pose en plus un rectangle noir, comme sur un document
+    déclassifié ; sans lui la zone est simplement vidée. Dans les deux cas le
+    texte est supprimé du PDF et les pixels des images situés dans la zone sont
+    effacés — un copier-coller depuis un lecteur ne peut plus rien retrouver.
+    Renvoie False si la zone est trop petite pour être exploitable.
+    """
+    page = doc[pno]
+    rect = fitz.Rect(min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1)) & page.rect
+    if rect.is_empty or rect.width < 1 or rect.height < 1:
+        return False
+    page.add_redact_annot(rect, fill=(0, 0, 0) if blackout else None)
+    page.apply_redactions(
+        images=fitz.PDF_REDACT_IMAGE_PIXELS,
+        graphics=fitz.PDF_REDACT_LINE_ART_NONE,
+        text=fitz.PDF_REDACT_TEXT_REMOVE,
+    )
+    return True
+
+
 def replace_all(
     doc: fitz.Document, search: str, replace: str, case_sensitive: bool
 ) -> EditResult:

@@ -7,15 +7,14 @@ import re
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import fonts, pdf_ops
+from .config import MAX_UPLOAD_MB
 from .store import Session, store
-
-MAX_UPLOAD_MB = 40
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
@@ -92,9 +91,23 @@ class MovePayload(BaseModel):
     offset: int = -1   # -1 monte la page, +1 la descend
 
 
+class RedactPayload(BaseModel):
+    x0: float
+    y0: float
+    x1: float
+    y1: float
+    blackout: bool = False   # True : rectangle noir par-dessus la zone vidée
+
+
 # --------------------------------------------------------------------------
 # Routes
 # --------------------------------------------------------------------------
+
+@app.get("/healthz")
+def healthz() -> dict:
+    """Sonde utilisée par Docker et les hébergeurs pour savoir si l'app répond."""
+    return {"status": "ok"}
+
 
 @app.get("/api/fonts")
 def font_catalogue() -> dict:
@@ -195,6 +208,54 @@ def textbox(doc_id: str, payload: TextBoxPayload) -> dict:
     )
     session.version += 1
     return {"changed": 1, **_state(session)}
+
+
+@app.post("/api/{doc_id}/image")
+async def add_image(
+    doc_id: str,
+    page: int = Form(...),
+    x: float = Form(...),
+    y: float = Form(...),
+    width: float = Form(...),
+    height: float = Form(...),
+    file: UploadFile = File(...),
+) -> dict:
+    """Insère une image ou une signature à l'endroit indiqué (coordonnées PDF)."""
+    session = _session(doc_id)
+    if not 0 <= page < session.doc.page_count:
+        raise HTTPException(404, "Page inexistante.")
+    data = await file.read()
+    if not data:
+        raise HTTPException(400, "Fichier vide.")
+    if len(data) > MAX_UPLOAD_MB * 1024 * 1024:
+        raise HTTPException(413, f"Image trop volumineuse (max {MAX_UPLOAD_MB} Mo).")
+
+    session.snapshot()
+    try:
+        rect = pdf_ops.insert_image(session.doc, page, x, y, width, height, data)
+    except Exception as exc:
+        session.undo_stack.pop()
+        raise HTTPException(400, f"Image inutilisable : {exc}") from exc
+    session.version += 1
+    return {"rect": [round(v, 2) for v in rect], **_state(session)}
+
+
+@app.post("/api/{doc_id}/page/{pno}/redact")
+def redact(doc_id: str, pno: int, payload: RedactPayload) -> dict:
+    """Efface (ou noircit) définitivement une zone de la page."""
+    session = _session(doc_id)
+    if not 0 <= pno < session.doc.page_count:
+        raise HTTPException(404, "Page inexistante.")
+    session.snapshot()
+    done = pdf_ops.redact_area(
+        session.doc, pno, payload.x0, payload.y0, payload.x1, payload.y1, payload.blackout
+    )
+    if done:
+        session.version += 1
+    else:
+        session.undo_stack.pop()
+        raise HTTPException(400, "Zone trop petite : tracez un rectangle plus grand.")
+    return {"redacted": 1, **_state(session)}
 
 
 @app.post("/api/{doc_id}/replace")

@@ -15,6 +15,9 @@ const state = {
   zoom: 1,
   adding: false,
   highlighting: false,
+  redacting: false,
+  placing: false,      // une image attend d'être posée sur une page
+  pendingImage: null,  // { file, url, ratio, width } de l'image à insérer
   editing: null,   // élément .tf en cours d'édition
   fonts: [],       // polices proposées par le serveur
   style: null,     // barre de style ouverte sur le fragment en cours
@@ -45,6 +48,8 @@ const el = {
   toast: $('#toast'),
   compress: $('#btn-compress'),
   highlight: $('#btn-highlight'),
+  redact: $('#btn-redact'),
+  imageInput: $('#image-input'),
   mergeInput: $('#merge-input'),
   pagesPanel: $('#pages-panel'),
   extractSpec: $('#extract-spec'),
@@ -503,18 +508,29 @@ el.highlight.addEventListener('click', () => {
   setMode(state.highlighting ? null : 'highlighting');
 });
 
-/** Les modes « ajouter du texte » et « surligner » s'excluent l'un l'autre. */
+/** Un seul mode de clic à la fois : ajouter, surligner, caviarder, poser une image. */
 function setMode(mode) {
   state.adding = mode === 'adding';
   state.highlighting = mode === 'highlighting';
+  state.redacting = mode === 'redacting';
+  state.placing = mode === 'placing';
+  if (!state.placing) clearPendingImage();
+  if (!state.redacting) el.viewer.querySelectorAll('.selbox').forEach((n) => n.remove());
+
   $('#btn-add').classList.toggle('active', state.adding);
   el.highlight.classList.toggle('active', state.highlighting);
+  el.redact.classList.toggle('active', state.redacting);
+  $('#btn-image').classList.toggle('active', state.placing);
   el.viewer.querySelectorAll('.page').forEach((n) => {
     n.classList.toggle('adding', state.adding);
     n.classList.toggle('highlighting', state.highlighting);
+    n.classList.toggle('redacting', state.redacting);
+    n.classList.toggle('placing', state.placing);
   });
   if (state.adding) toast('Cliquez à l’endroit où placer le texte');
   if (state.highlighting) toast('Cliquez un texte pour le surligner');
+  if (state.redacting) toast('Tracez un rectangle sur la zone à masquer');
+  if (state.placing) toast('Cliquez à l’endroit où poser l’image');
 }
 
 async function highlightFragment(div) {
@@ -625,10 +641,23 @@ el.extractSpec.addEventListener('keydown', (e) => {
 });
 
 function onPageMouseDown(e) {
-  if (!state.adding || e.button !== 0) return;
+  if (e.button !== 0) return;
   const node = e.currentTarget;
   const rect = node.getBoundingClientRect();
-  openNewBox(node, (e.clientX - rect.left) / state.zoom, (e.clientY - rect.top) / state.zoom);
+  const x = (e.clientX - rect.left) / state.zoom;
+  const y = (e.clientY - rect.top) / state.zoom;
+  if (state.adding) openNewBox(node, x, y);
+  else if (state.placing) openImageBox(node, x, y);
+  else if (state.redacting) startSelection(node, e, x, y);
+}
+
+/** Coordonnées PDF d'un événement souris sur une page. */
+function pagePoint(node, e) {
+  const rect = node.getBoundingClientRect();
+  return {
+    x: (e.clientX - rect.left) / state.zoom,
+    y: (e.clientY - rect.top) / state.zoom,
+  };
 }
 
 function openNewBox(node, x, y) {
@@ -684,6 +713,199 @@ function openNewBox(node, x, y) {
       busy(false);
     }
   });
+}
+
+/* --------------------------------------------------- image et signature */
+
+// Largeur par défaut du cadre posé sur la page, en points PDF (~6 cm).
+const IMAGE_DEFAULT_WIDTH = 170;
+
+el.imageInput.addEventListener('change', () => {
+  const file = el.imageInput.files[0];
+  el.imageInput.value = '';
+  if (!file) return;
+  if (!/^image\//.test(file.type)) return toast('Ce fichier n’est pas une image.', true);
+
+  // On lit les dimensions dans le navigateur pour proposer un cadre aux bonnes
+  // proportions avant même d'envoyer quoi que ce soit au serveur.
+  const url = URL.createObjectURL(file);
+  const probe = new Image();
+  probe.onload = () => {
+    clearPendingImage();
+    const ratio = probe.naturalWidth / probe.naturalHeight || 1;
+    state.pendingImage = { file, url, ratio, width: IMAGE_DEFAULT_WIDTH };
+    setMode('placing');
+  };
+  probe.onerror = () => {
+    URL.revokeObjectURL(url);
+    toast('Image illisible.', true);
+  };
+  probe.src = url;
+});
+
+function clearPendingImage() {
+  el.viewer.querySelectorAll('.imgbox').forEach((n) => n.remove());
+  if (state.pendingImage) {
+    URL.revokeObjectURL(state.pendingImage.url);
+    state.pendingImage = null;
+  }
+}
+
+/** Cadre d'aperçu déplaçable et redimensionnable, avant insertion définitive. */
+function openImageBox(node, x, y) {
+  const pending = state.pendingImage;
+  if (!pending) return;
+  node.querySelectorAll('.imgbox').forEach((n) => n.remove());
+
+  const geo = { x, y, w: pending.width, h: pending.width / pending.ratio };
+  const box = document.createElement('div');
+  box.className = 'imgbox';
+  box.innerHTML = `
+    <img alt="Aperçu" draggable="false">
+    <span class="grip" title="Redimensionner"></span>
+    <div class="row">
+      <button class="cancel">Annuler</button>
+      <button class="ok primary">Insérer</button>
+    </div>`;
+  box.querySelector('img').src = pending.url;
+  node.appendChild(box);
+
+  const place = () => {
+    box.style.left = `${geo.x * state.zoom}px`;
+    box.style.top = `${geo.y * state.zoom}px`;
+    box.style.width = `${geo.w * state.zoom}px`;
+    box.style.height = `${geo.h * state.zoom}px`;
+  };
+  place();
+
+  // Glisser l'aperçu le déplace ; glisser la poignée le redimensionne, à
+  // proportions constantes pour ne pas déformer une signature.
+  const drag = (e, onMove) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const start = pagePoint(node, e);
+    const from = { ...geo };
+    const move = (ev) => {
+      const p = pagePoint(node, ev);
+      onMove(from, p.x - start.x, p.y - start.y);
+      place();
+    };
+    const up = () => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+    };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+  };
+
+  box.querySelector('img').addEventListener('mousedown', (e) => drag(e, (from, dx, dy) => {
+    geo.x = Math.max(0, from.x + dx);
+    geo.y = Math.max(0, from.y + dy);
+  }));
+  box.querySelector('.grip').addEventListener('mousedown', (e) => drag(e, (from, dx) => {
+    geo.w = Math.max(16, from.w + dx);
+    geo.h = geo.w / pending.ratio;
+  }));
+  box.addEventListener('mousedown', (e) => e.stopPropagation());
+  box.querySelector('.cancel').addEventListener('click', () => setMode(null));
+
+  box.querySelector('.ok').addEventListener('click', async () => {
+    const form = new FormData();
+    form.append('file', pending.file, pending.file.name || 'image.png');
+    form.append('page', String(+node.dataset.page));
+    form.append('x', String(geo.x));
+    form.append('y', String(geo.y));
+    form.append('width', String(geo.w));
+    form.append('height', String(geo.h));
+    busy(true, 'Insertion de l’image…');
+    try {
+      const data = await api(`/api/${state.docId}/image`, { method: 'POST', body: form });
+      applyState(data);
+      setMode(null);
+      await refreshPage(node);
+      toast('Image insérée');
+    } catch (err) {
+      toast(err.message, true);
+    } finally {
+      busy(false);
+    }
+  });
+}
+
+/* -------------------------------------------------------------- caviardage */
+
+el.redact.addEventListener('click', () => {
+  setMode(state.redacting ? null : 'redacting');
+});
+
+/** Tracé du rectangle à masquer, puis choix entre effacer et noircir. */
+function startSelection(node, e, x0, y0) {
+  e.preventDefault();
+  node.querySelectorAll('.selbox').forEach((n) => n.remove());
+  const area = { x0, y0, x1: x0, y1: y0 };
+  const box = document.createElement('div');
+  box.className = 'selbox';
+  node.appendChild(box);
+
+  const place = () => {
+    const z = state.zoom;
+    box.style.left = `${Math.min(area.x0, area.x1) * z}px`;
+    box.style.top = `${Math.min(area.y0, area.y1) * z}px`;
+    box.style.width = `${Math.abs(area.x1 - area.x0) * z}px`;
+    box.style.height = `${Math.abs(area.y1 - area.y0) * z}px`;
+  };
+  place();
+
+  const move = (ev) => {
+    const p = pagePoint(node, ev);
+    area.x1 = p.x;
+    area.y1 = p.y;
+    place();
+  };
+  const up = () => {
+    window.removeEventListener('mousemove', move);
+    window.removeEventListener('mouseup', up);
+    if (Math.abs(area.x1 - area.x0) < 5 || Math.abs(area.y1 - area.y0) < 5) {
+      box.remove();   // simple clic : rien à masquer
+      return;
+    }
+    addSelectionTools(node, box, area);
+  };
+  window.addEventListener('mousemove', move);
+  window.addEventListener('mouseup', up);
+}
+
+function addSelectionTools(node, box, area) {
+  const tools = document.createElement('div');
+  tools.className = 'selbox-tools';
+  tools.innerHTML = `
+    <button class="erase">Effacer</button>
+    <button class="black">Noircir</button>
+    <button class="cancel">✕</button>`;
+  tools.addEventListener('mousedown', (e) => e.stopPropagation());
+  tools.querySelector('.cancel').addEventListener('click', () => box.remove());
+  tools.querySelector('.erase').addEventListener('click', () => applyRedaction(node, box, area, false));
+  tools.querySelector('.black').addEventListener('click', () => applyRedaction(node, box, area, true));
+  box.appendChild(tools);
+}
+
+async function applyRedaction(node, box, area, blackout) {
+  const pno = +node.dataset.page;
+  busy(true, blackout ? 'Noircissage…' : 'Effacement…');
+  try {
+    const data = await postJSON(`/api/${state.docId}/page/${pno}/redact`, {
+      x0: area.x0, y0: area.y0, x1: area.x1, y1: area.y1, blackout,
+    });
+    applyState(data);
+    box.remove();
+    resetSearch();
+    await refreshPage(node);
+    toast(blackout ? 'Zone noircie' : 'Zone effacée');
+  } catch (err) {
+    toast(err.message, true);
+  } finally {
+    busy(false);
+  }
 }
 
 /* ------------------------------------------------------ recherche / remplace */
@@ -879,9 +1101,10 @@ $('#btn-close').addEventListener('click', async () => {
 /* -------------------------------------------------------------- raccourcis */
 
 document.addEventListener('keydown', (e) => {
-  // Échap quitte le mode « ajouter » ou « surligner » ; l'édition d'un fragment
-  // gère sa propre touche Échap, on ne lui marche donc pas dessus.
-  if (e.key === 'Escape' && !state.editing && (state.adding || state.highlighting)) {
+  // Échap quitte le mode en cours ; l'édition d'un fragment gère sa propre
+  // touche Échap, on ne lui marche donc pas dessus.
+  const inMode = state.adding || state.highlighting || state.redacting || state.placing;
+  if (e.key === 'Escape' && !state.editing && inMode) {
     setMode(null);
     return;
   }

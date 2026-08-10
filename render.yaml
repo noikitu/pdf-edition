@@ -1,0 +1,20 @@
+# Déploiement en un clic sur Render : « New → Blueprint », pointer sur ce dépôt.
+# Render fournit lui-même la variable PORT, que run.py respecte.
+services:
+  - type: web
+    name: lemonpdf
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /healthz
+    envVars:
+      - key: LEMONPDF_OPEN_BROWSER
+        value: "0"
+      - key: LEMONPDF_MAX_UPLOAD_MB
+        value: "25"
+      # Le plan gratuit dispose de peu de mémoire : on garde moins de documents
+      # ouverts et on les libère plus vite.
+      - key: LEMONPDF_MAX_SESSIONS
+        value: "8"
+      - key: LEMONPDF_SESSION_TTL
+        value: "3600"

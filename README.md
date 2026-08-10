@@ -20,6 +20,40 @@ python run.py
 Le navigateur s'ouvre sur <http://127.0.0.1:8000>. Options : `--port`, `--host`,
 `--no-browser`, `--reload`.
 
+## Déploiement
+
+L'application n'a besoin d'aucune base de données ni service externe : un seul
+processus suffit.
+
+```bash
+docker compose up --build          # puis http://localhost:8000
+```
+
+Ou directement :
+
+```bash
+docker build -t lemonpdf . && docker run -p 8000:8000 lemonpdf
+```
+
+Sur un hébergeur : **Render** (« New → Blueprint » sur ce dépôt, `render.yaml` est
+fourni), ou n'importe quelle plateforme qui lit un `Dockerfile` ou un `Procfile`
+(Railway, Fly.io, Cloud Run, Heroku). La variable standard `PORT` est respectée.
+
+Tout se règle par variables d'environnement, sans toucher au code :
+
+| Variable | Défaut | Rôle |
+| --- | --- | --- |
+| `HOST` / `PORT` | `127.0.0.1` / `8000` | adresse d'écoute |
+| `LEMONPDF_MAX_UPLOAD_MB` | `40` | taille maximale d'un fichier envoyé |
+| `LEMONPDF_SESSION_TTL` | `21600` | durée de vie d'un document inactif, en secondes |
+| `LEMONPDF_MAX_SESSIONS` | `40` | documents gardés en mémoire simultanément |
+| `LEMONPDF_OPEN_BROWSER` | `1` | ouvrir le navigateur au démarrage |
+
+Un point à connaître : **un seul worker**. Les documents en cours d'édition vivent dans
+la mémoire du processus, un second worker ne les verrait pas — d'où `workers=1` dans
+`run.py`. Pour encaisser plus de monde, on met plusieurs instances derrière un
+répartiteur avec des sessions collantes, pas plusieurs workers.
+
 ## Utilisation
 
 | Action | Comment |
@@ -30,8 +64,18 @@ Le navigateur s'ouvre sur <http://127.0.0.1:8000>. Options : `--port`, `--host`,
 | Supprimer un texte | le vider puis `Entrée` |
 | Corriger partout | « Remplacer » → mot fautif, mot correct, « Tout remplacer » |
 | Ajouter un texte | « Texte », cliquer à l'endroit voulu, saisir, « Ajouter » |
+| Insérer une image ou une signature | « Image », choisir le fichier, cliquer sur la page, ajuster le cadre, « Insérer » |
+| Effacer ou noircir une zone | « Caviarder », tracer un rectangle, puis « Effacer » ou « Noircir » |
+| Surligner | « Surligner », puis cliquer un texte |
+| Gérer les pages | au survol d'une page : pivoter, monter, descendre, supprimer |
+| Fusionner / extraire | « Fusionner » ajoute un PDF à la fin ; « Pages » extrait une sélection (`1-3, 5, 8-`) |
+| Alléger le fichier | « Compresser » |
 | Annuler / rétablir | `Ctrl+Z` / `Ctrl+Maj+Z` |
 | Récupérer le résultat | « Télécharger » (`Ctrl+S`) |
+
+« Caviarder » retire réellement le contenu du PDF — texte supprimé, pixels des images
+effacés dans la zone — et non un simple rectangle posé par-dessus, que n'importe quel
+lecteur permettrait de contourner. `Échap` quitte le mode en cours.
 
 Le remplacement global respecte la casse d'origine : `ortografe → orthographe`
 transforme aussi `Ortografe` en `Orthographe`.

@@ -1,0 +1,15 @@
+# docker compose up  →  http://localhost:8000
+services:
+  lemonpdf:
+    build: .
+    image: lemonpdf
+    ports:
+      - "8000:8000"
+    environment:
+      # Taille maximale d'un fichier envoyé, en Mo.
+      LEMONPDF_MAX_UPLOAD_MB: "40"
+      # Durée de vie d'un document inactif, en secondes.
+      LEMONPDF_SESSION_TTL: "21600"
+      # Nombre de documents gardés en mémoire simultanément.
+      LEMONPDF_MAX_SESSIONS: "40"
+    restart: unless-stopped

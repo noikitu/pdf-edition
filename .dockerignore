@@ -1,0 +1,17 @@
+.git
+.gitignore
+.venv
+.pytest_cache
+__pycache__
+**/__pycache__
+*.pyc
+.DS_Store
+tests
+requirements-dev.txt
+design_handoff_pdf_editor_ui
+*.zip
+README.md
+docker-compose.yml
+Dockerfile
+render.yaml
+Procfile

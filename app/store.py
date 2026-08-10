@@ -8,8 +8,9 @@ import uuid
 
 import fitz
 
+from .config import MAX_SESSIONS, SESSION_TTL
+
 MAX_HISTORY = 25          # nombre d'états conservés pour l'annulation
-SESSION_TTL = 6 * 3600    # durée de vie d'une session sans activité (secondes)
 
 
 class Session:
@@ -78,6 +79,7 @@ class Store:
         with self._lock:
             self._sessions[doc_id] = session
         self.purge()
+        self._evict()
         return doc_id, session
 
     def get(self, doc_id: str) -> Session | None:
@@ -98,6 +100,21 @@ class Store:
         with self._lock:
             stale = [k for k, s in self._sessions.items() if s.touched < cutoff]
             dropped = [self._sessions.pop(k) for k in stale]
+        for session in dropped:
+            session.close()
+
+    def _evict(self) -> None:
+        """Garde au plus MAX_SESSIONS documents ouverts, en fermant les plus anciens.
+
+        Les documents résident en mémoire : sans cette borne, une instance
+        partagée finirait par gonfler jusqu'à se faire tuer par l'hébergeur.
+        """
+        with self._lock:
+            excess = len(self._sessions) - MAX_SESSIONS
+            if excess <= 0:
+                return
+            oldest = sorted(self._sessions, key=lambda k: self._sessions[k].touched)
+            dropped = [self._sessions.pop(k) for k in oldest[:excess]]
         for session in dropped:
             session.close()
 

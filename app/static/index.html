@@ -148,82 +148,14 @@
 
 <div id="overlay" class="overlay" hidden>
   <div class="spinner"></div>
-  <!-- Demi-citron vu de face, pressé par la main : la paume passe derrière, les
-       doigts se referment devant sur le rebord, le jus coule par le bas. -->
-  <svg id="squeeze-art" class="squeeze-art" viewBox="0 0 170 160" hidden>
-    <ellipse class="squeeze-drop-shadow" cx="76" cy="150" rx="26" ry="5"></ellipse>
+  <!-- Pas d'attribut `hidden` ici : la visibilité est pilotée par la classe
+       `squeezing` de l'overlay. Un `hidden` ne serait jamais retiré par le script,
+       et la règle `[hidden] { display: none !important }` le masquerait pour de bon. -->
+  <picture class="squeeze-photo">
+    <source srcset="/squeezing.avif" type="image/avif">
+    <img src="/squeezing.png" alt="Une main pressant un demi-citron">
+  </picture>
 
-    <!-- dos de la main et poignet, derrière le fruit -->
-    <g class="squeeze-hand">
-      <path d="M96 38c22-8 42 6 44 28 2 22-8 40-24 48-6 3-13 4-19 2 8-24 8-56-1-78z"
-            fill="#f8cea8" stroke="#e0a97c" stroke-width="1.4"></path>
-      <path d="M126 104c10 4 20 12 24 22l4 12-34 8-10-30z"
-            fill="#f4c69f" stroke="#e0a97c" stroke-width="1.4"></path>
-    </g>
-
-    <g class="squeeze-lemon">
-      <!-- écorce puis pulpe -->
-      <ellipse cx="74" cy="76" rx="35" ry="40" fill="#fdf6cd" stroke="#f0cd52" stroke-width="1.6"
-               transform="rotate(-10 74 76)"></ellipse>
-      <ellipse cx="74" cy="76" rx="27" ry="32" fill="#ffe14f" transform="rotate(-10 74 76)"></ellipse>
-      <!-- quartiers -->
-      <g stroke="#fff8d2" stroke-width="2.4" stroke-linecap="round" fill="none"
-         transform="rotate(-10 74 76)">
-        <path d="M74 76 74 45"></path>
-        <path d="M74 76 96 55"></path>
-        <path d="M74 76 100 78"></path>
-        <path d="M74 76 94 100"></path>
-        <path d="M74 76 74 108"></path>
-        <path d="M74 76 54 100"></path>
-        <path d="M74 76 48 78"></path>
-        <path d="M74 76 52 55"></path>
-      </g>
-      <!-- gouttes de jus retenues dans la chair, et reflet -->
-      <g fill="#fff6b8" opacity=".75">
-        <ellipse cx="64" cy="62" rx="3.4" ry="2.6"></ellipse>
-        <ellipse cx="86" cy="70" rx="2.8" ry="2.2"></ellipse>
-        <ellipse cx="70" cy="92" rx="3" ry="2.3"></ellipse>
-        <ellipse cx="88" cy="90" rx="2.4" ry="1.9"></ellipse>
-      </g>
-      <ellipse cx="74" cy="76" rx="35" ry="40" fill="url(#squeeze-shine)"
-               transform="rotate(-10 74 76)"></ellipse>
-    </g>
-
-    <!-- doigts refermés devant le fruit, avec les ongles -->
-    <g class="squeeze-hand">
-      <g fill="#ffd9b4" stroke="#e0a97c" stroke-width="1.4">
-        <rect x="30" y="36" width="30" height="17" rx="8.5" transform="rotate(-20 45 44)"></rect>
-        <rect x="26" y="56" width="32" height="17" rx="8.5" transform="rotate(-7 42 64)"></rect>
-        <rect x="28" y="76" width="30" height="16" rx="8" transform="rotate(6 43 84)"></rect>
-        <rect x="34" y="94" width="26" height="15" rx="7.5" transform="rotate(16 47 101)"></rect>
-        <!-- pouce, par-dessus le rebord -->
-        <rect x="58" y="18" width="21" height="30" rx="10.5" transform="rotate(-14 68 33)"></rect>
-      </g>
-      <g fill="#fff1e3" opacity=".9">
-        <ellipse cx="36" cy="45" rx="5" ry="4" transform="rotate(-20 36 45)"></ellipse>
-        <ellipse cx="32" cy="64" rx="5.2" ry="4.2" transform="rotate(-7 32 64)"></ellipse>
-        <ellipse cx="34" cy="85" rx="5" ry="4" transform="rotate(6 34 85)"></ellipse>
-        <ellipse cx="40" cy="102" rx="4.4" ry="3.6" transform="rotate(16 40 102)"></ellipse>
-        <ellipse cx="69" cy="26" rx="6" ry="4.6" transform="rotate(-14 69 26)"></ellipse>
-      </g>
-    </g>
-
-    <!-- filet de jus, puis gouttes qui tombent -->
-    <g class="squeeze-drips">
-      <path class="squeeze-stream" d="M72 112c-2 8 3 12 1 20-2 7 2 10 1 14"
-            stroke="#f7e07a" stroke-width="3" stroke-linecap="round" fill="none"></path>
-      <circle class="drip drip-1" cx="73" cy="132" r="3.2"></circle>
-      <circle class="drip drip-2" cx="74" cy="140" r="2.6"></circle>
-      <circle class="drip drip-3" cx="74" cy="148" r="2"></circle>
-    </g>
-
-    <defs>
-      <radialGradient id="squeeze-shine" cx="34%" cy="26%" r="72%">
-        <stop offset="0%" stop-color="#fffdf0" stop-opacity=".85"></stop>
-        <stop offset="100%" stop-color="#ffe763" stop-opacity="0"></stop>
-      </radialGradient>
-    </defs>
-  </svg>
   <span id="overlay-text">Chargement…</span>
 </div>
 <!-- Loupe : chaque anneau reprend l'image du disque (background: inherit) avec un

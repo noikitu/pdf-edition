@@ -1122,7 +1122,7 @@ async function runAssist() {
   const scopeDocument = assist.scope.value === 'document';
   assist.results.hidden = true;
   assist.info.textContent = '';
-  busy(true, 'Relecture par le modèle…');
+  busy(true, 'Squeezing…', 'squeeze');
   try {
     const data = await postJSON(`/api/${state.docId}/assist`, {
       instruction: assist.instruction.value.trim(),

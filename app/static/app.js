@@ -212,6 +212,85 @@ el.dropzone.addEventListener('drop', (e) => {
   if (file) openFile(file);
 });
 
+/* --------------------------------------------------- reprise d'un document */
+
+/** Documents sauvegardés sur cette machine, proposés à l'ouverture. */
+async function loadResumable() {
+  try {
+    const data = await api('/api/sessions');
+    const list = data.sessions || [];
+    const box = $('#resume');
+    const items = $('#resume-list');
+    items.innerHTML = '';
+    if (!list.length) { box.hidden = true; return; }
+
+    list.forEach((entry) => {
+      const row = document.createElement('div');
+      row.className = 'resume-row';
+      const open = document.createElement('button');
+      open.className = 'resume-open';
+      open.innerHTML = '<b></b><span></span>';
+      open.querySelector('b').textContent = entry.name;
+      open.querySelector('span').textContent =
+        `${formatSize(entry.size)} — ${formatWhen(entry.saved_at)}`;
+      open.addEventListener('click', () => resumeDoc(entry.doc_id));
+
+      const forget = document.createElement('button');
+      forget.className = 'icon';
+      forget.textContent = '✕';
+      forget.title = 'Oublier ce document';
+      forget.addEventListener('click', async () => {
+        try { await api(`/api/${entry.doc_id}`, { method: 'DELETE' }); } catch (_) { /* déjà parti */ }
+        loadResumable();
+      });
+
+      row.append(open, forget);
+      items.appendChild(row);
+    });
+    box.hidden = false;
+  } catch (_) { /* serveur sans sauvegarde : l'accueil reste tel quel */ }
+}
+
+function formatWhen(seconds) {
+  const minutes = Math.max(0, Math.round((Date.now() - seconds * 1000) / 60000));
+  if (minutes < 1) return 'à l’instant';
+  if (minutes < 60) return `il y a ${minutes} min`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `il y a ${hours} h`;
+  return new Date(seconds * 1000).toLocaleDateString('fr-FR');
+}
+
+async function resumeDoc(docId) {
+  busy(true, 'Reprise du document…');
+  try {
+    const data = await api(`/api/${docId}/state`);
+    state.docId = data.doc_id;
+    state.name = data.name;
+    adoptDocument(data);
+    toast('Document repris — l’historique d’annulation repart de zéro');
+  } catch (err) {
+    toast(err.message, true);
+    loadResumable();
+  } finally {
+    busy(false);
+  }
+}
+
+/** Bascule l'interface en mode « document ouvert ». */
+function adoptDocument(data) {
+  applyState(data);
+  el.dropzone.hidden = true;
+  el.viewer.hidden = false;
+  el.docTools.hidden = false;
+  el.docActions.hidden = false;
+  el.sideActions.hidden = false;
+  el.dock.hidden = false;
+  el.filename.textContent = data.name;
+  buildPages();
+  buildThumbs();
+  checkScan();
+}
+
 async function openFile(file) {
   if (!/\.pdf$/i.test(file.name) && file.type !== 'application/pdf') {
     return toast('Ce fichier n’est pas un PDF.', true);
@@ -223,17 +302,7 @@ async function openFile(file) {
     const data = await api('/api/upload', { method: 'POST', body: form });
     state.docId = data.doc_id;
     state.name = data.name;
-    applyState(data);
-    el.dropzone.hidden = true;
-    el.viewer.hidden = false;
-    el.docTools.hidden = false;
-    el.docActions.hidden = false;
-    el.sideActions.hidden = false;
-    el.dock.hidden = false;
-    el.filename.textContent = data.name;
-    buildPages();
-    buildThumbs();
-    checkScan();
+    adoptDocument(data);
     toast(`${data.pages.length} page(s) chargée(s)`);
   } catch (err) {
     toast(err.message, true);
@@ -559,6 +628,7 @@ async function commitEdit() {
     if (data.changed) {
       if (node) await refreshPage(node);
       if (!text) toast('Texte supprimé');
+      else if (data.reflowed) toast('Texte modifié — paragraphe recomposé');
       else if (data.approximated) toast('Texte modifié — police substituée');
       else toast('Texte modifié');
     } else {
@@ -1765,7 +1835,9 @@ $('#btn-close').addEventListener('click', async () => {
   setMode(null);
   setLens(false);
   resetSearch();
+  // La suppression efface aussi la sauvegarde : fermer est un geste volontaire.
   try { await fetch(`/api/${id}`, { method: 'DELETE' }); } catch (_) { /* sans importance */ }
+  loadResumable();
 });
 
 /* -------------------------------------------------------------- raccourcis */
@@ -1799,6 +1871,8 @@ api('/api/fonts')
 fetch('/healthz').then((res) => {
   if (!res.ok) toast(STALE_SERVER_ERROR, true);
 }).catch(() => { /* serveur injoignable : les appels suivants le signaleront */ });
+
+loadResumable();
 
 window.addEventListener('beforeunload', (e) => {
   if (state.docId && state.version > 0) { e.preventDefault(); e.returnValue = ''; }

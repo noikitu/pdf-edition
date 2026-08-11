@@ -755,6 +755,47 @@ button.active {
 }
 .hints li::before { content: "✓"; color: var(--ink); }
 
+/* ------------------------------------------------------ reprise de document */
+
+.resume {
+  margin: 30px auto 0;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 22px;
+  border-top: 1px solid var(--hairline);
+  text-align: left;
+}
+.resume-title {
+  font: 600 13px/1 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  color: var(--ink);
+}
+.resume-note { font: 400 11px/1.4 'Helvetica Neue', Helvetica, Arial, sans-serif; color: var(--muted-soft); }
+.resume-list { display: flex; flex-direction: column; gap: 6px; }
+.resume-row { display: flex; align-items: center; gap: 6px; }
+.resume-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+  padding: 9px 12px;
+  border-radius: 10px;
+}
+.resume-open b {
+  font: 500 13px/1.3 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.resume-open span {
+  font: 400 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--muted-soft);
+}
+.resume-row .icon { width: 30px; height: 30px; font-size: 12px; }
+
 /* ---------------------------------------------------------------- pages PDF */
 
 .viewer { padding: 36px 16px 60px; display: flex; flex-direction: column; align-items: center; gap: 24px; }

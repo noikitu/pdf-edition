@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import fonts, llm, pdf_ops
+from . import fonts, llm, pdf_ops, persist
 from .config import MAX_UPLOAD_MB
 from .store import Session, store
 
@@ -30,6 +30,10 @@ def _session(doc_id: str) -> Session:
 
 
 def _state(session: Session) -> dict:
+    # Toutes les routes qui modifient le document terminent ici : c'est donc le
+    # point de passage naturel pour écrire la sauvegarde, sans avoir à l'appeler
+    # depuis chacune d'elles. Sans changement de version, l'appel ne fait rien.
+    session.autosave()
     return {
         "version": session.version,
         "can_undo": session.can_undo,
@@ -149,6 +153,12 @@ async def upload(file: UploadFile = File(...)) -> dict:
     return {"doc_id": doc_id, "name": session.name, **_state(session)}
 
 
+@app.get("/api/sessions")
+def sessions() -> dict:
+    """Documents sauvegardés, proposés à la reprise sur l'écran d'accueil."""
+    return {"sessions": persist.index(), "autosave": persist.enabled()}
+
+
 @app.get("/api/{doc_id}/state")
 def state(doc_id: str) -> dict:
     session = _session(doc_id)
@@ -243,6 +253,7 @@ def edit(doc_id: str, payload: EditPayload) -> dict:
     return {
         "changed": result.changed,
         "approximated": result.approximated,
+        "reflowed": result.reflowed,
         "skipped": len(unresolved),
         **_state(session),
     }
@@ -380,6 +391,7 @@ def replace(doc_id: str, payload: ReplacePayload) -> dict:
     return {
         "changed": result.changed,
         "approximated": result.approximated,
+        "reflowed": result.reflowed,
         **_state(session),
     }
 

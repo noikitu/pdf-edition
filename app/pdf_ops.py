@@ -347,6 +347,241 @@ def _write_line(
     writer.write_text(page, overlay=True)
 
 
+# --------------------------------------------------------------------------
+# Reflux des paragraphes
+# --------------------------------------------------------------------------
+#
+# Quand le texte saisi ne tient plus sur sa ligne, la réponse historique était de
+# réduire la police. On préfère désormais recomposer le paragraphe entier :
+# recalculer ses retours à la ligne, et le laisser gagner une ligne s'il y a de
+# la place en dessous.
+#
+# Le reflux est refusé — et l'on retombe alors sur la réduction — dès que
+# recomposer ferait perdre de l'information :
+#   * plusieurs styles dans le paragraphe (un mot en gras serait aplati) ;
+#   * une césure en fin de ligne (on ne sait pas si « bien- » et « être »
+#     formaient un mot coupé ou un mot composé) ;
+#   * du texte pivoté, ou un bloc d'une seule ligne ;
+#   * pas assez de place sous le paragraphe pour la ligne supplémentaire ;
+#   * deux modifications dans le même paragraphe au cours du même appel.
+
+# Compression maximale de l'interligne avant de renoncer au reflux.
+MIN_LEADING_SQUEEZE = 0.9
+
+
+@dataclass
+class Paragraph:
+    """Un paragraphe recomposable : lignes homogènes, place connue autour."""
+
+    page: int
+    line_bboxes: list[tuple[float, float, float, float]]
+    baselines: list[float]
+    texts: list[str]
+    first_left: float    # bord gauche de la première ligne (alinéa éventuel)
+    left: float          # bord gauche des lignes suivantes
+    right: float         # bord droit de la colonne
+    leading: float       # interligne mesuré
+    room_below: float    # espace vertical libre sous le paragraphe
+    size: float
+    fontname: str
+    alias: str
+    color: str
+
+    def text_with(self, index: int, replacement: str) -> str:
+        parts = list(self.texts)
+        parts[index] = replacement
+        return " ".join(p for p in parts if p)
+
+
+@dataclass
+class ReflowPlan:
+    """Recomposition validée d'avance : on ne caviarde qu'une fois sûr d'écrire."""
+
+    para: Paragraph
+    lines: list[str]
+    leading: float
+    font: fitz.Font
+    size: float
+
+
+def _page_dict(page: fitz.Page) -> dict:
+    """Même extraction que `extract_items`, pour que les index de blocs et de
+    lignes désignent bien les mêmes éléments."""
+    flags = fitz.TEXTFLAGS_DICT & ~fitz.TEXT_PRESERVE_LIGATURES
+    return page.get_text("dict", flags=flags)
+
+
+def paragraph_at(page: fitz.Page, raw: dict, bi: int) -> Paragraph | None:
+    """Décrit le bloc `bi` s'il est recomposable, sinon None."""
+    blocks = raw.get("blocks", [])
+    if not 0 <= bi < len(blocks):
+        return None
+    block = blocks[bi]
+    if block.get("type") != 0:
+        return None
+    lines = block.get("lines", [])
+    if len(lines) < 2:
+        return None
+
+    styles: set[tuple] = set()
+    texts: list[str] = []
+    boxes: list[tuple[float, float, float, float]] = []
+    baselines: list[float] = []
+    for line in lines:
+        if abs(line.get("dir", (1, 0))[1]) > 0.01:
+            return None
+        spans = [s for s in line.get("spans", []) if s["text"].strip()]
+        if not spans:
+            return None
+        for span in spans:
+            styles.add((span["font"], round(span["size"], 2), span["color"]))
+        if len(styles) > 1:
+            return None
+        text = "".join(s["text"] for s in spans).strip()
+        if not text:
+            return None
+        texts.append(text)
+        boxes.append(tuple(line["bbox"]))
+        baselines.append(spans[0]["origin"][1])
+
+    if any(t.endswith("-") for t in texts[:-1]):
+        return None
+
+    fontname, size, color = next(iter(styles))
+    flags = lines[0]["spans"][0]["flags"]
+
+    # La dernière ligne d'un paragraphe est courte : elle sous-estimerait la
+    # largeur de la colonne, on la retire du calcul du bord droit.
+    right = max(b[2] for b in boxes[:-1])
+    right = min(right, page.rect.x1 - PAGE_MARGIN)
+    body_left = min(b[0] for b in boxes[1:])
+
+    gaps = [b - a for a, b in zip(baselines, baselines[1:])]
+    gaps = [g for g in gaps if g > 0]
+    leading = sorted(gaps)[len(gaps) // 2] if gaps else size * 1.18
+
+    # Un « bloc » PyMuPDF n'est pas toujours un paragraphe : deux paragraphes
+    # rapprochés peuvent y être regroupés. Les recomposer ensemble les fondrait
+    # en un seul flux, ce qui perdrait la séparation. On cherche donc les indices
+    # d'une rupture interne, et on renonce dès qu'on en trouve un.
+    if any(g > leading * 1.35 for g in gaps):
+        return None                                    # interligne élargi
+    if any(b[0] > body_left + 4 for b in boxes[1:]):
+        return None                                    # ligne en alinéa
+    column = right - body_left
+    if column > 0 and any(b[2] < right - column * 0.18 for b in boxes[:-1]):
+        return None                                    # ligne courte en plein milieu
+
+    rect = fitz.Rect(boxes[0])
+    for box in boxes[1:]:
+        rect |= fitz.Rect(box)
+
+    return Paragraph(
+        page=page.number,
+        line_bboxes=boxes,
+        baselines=baselines,
+        texts=texts,
+        first_left=boxes[0][0],
+        left=body_left,
+        right=right,
+        leading=leading,
+        room_below=_room_below(page, blocks, rect),
+        size=size,
+        fontname=fontname,
+        alias=base14_alias(fontname, flags),
+        color=_color_hex(color),
+    )
+
+
+def _room_below(page: fitz.Page, blocks: list[dict], rect: fitz.Rect) -> float:
+    """Espace vertical libre sous un paragraphe, avant l'élément suivant.
+
+    Seuls comptent les blocs qui chevauchent horizontalement la colonne : dans
+    une mise en page à deux colonnes, celle d'à côté ne fait pas obstacle.
+    """
+    limit = page.rect.y1 - PAGE_MARGIN
+    for block in blocks:
+        bx0, by0, bx1, by1 = block["bbox"]
+        if by0 <= rect.y1 + 0.5:
+            continue
+        if bx1 <= rect.x0 or bx0 >= rect.x1:
+            continue
+        limit = min(limit, by0)
+    return max(0.0, limit - rect.y1)
+
+
+def _wrap(text: str, font: fitz.Font, size: float, first_width: float, width: float):
+    """Découpe `text` en lignes tenant dans la colonne. None si un mot est trop long."""
+    words = text.split()
+    if not words:
+        return []
+    lines: list[str] = []
+    current = ""
+    for word in words:
+        limit = first_width if not lines else width
+        trial = f"{current} {word}" if current else word
+        if current and font.text_length(trial, fontsize=size) > limit:
+            lines.append(current)
+            current = word
+        else:
+            current = trial
+        if font.text_length(current, fontsize=size) > (first_width if not lines else width):
+            return None
+    lines.append(current)
+    return lines
+
+
+def plan_reflow(
+    page: fitz.Page, raw: dict, item: TextItem, text: str, resolver: FontResolver
+) -> ReflowPlan | None:
+    """Prépare la recomposition du paragraphe contenant `item`, ou renonce.
+
+    Tout est décidé ici, avant le moindre caviardage : si l'on effaçait le
+    paragraphe pour découvrir ensuite qu'il ne se recompose pas, ses autres
+    lignes seraient perdues.
+    """
+    try:
+        bi = int(item.id.split("-")[1])
+    except (IndexError, ValueError):
+        return None
+    para = paragraph_at(page, raw, bi)
+    if para is None:
+        return None
+    try:
+        li = int(item.id.split("-")[2])
+    except (IndexError, ValueError):
+        return None
+    if not 0 <= li < len(para.texts):
+        return None
+
+    full = para.text_with(li, text.replace("\n", " ").strip())
+    font, _ = resolver.resolve(page.number, para.fontname, para.alias, full)
+    lines = _wrap(full, font, para.size, para.right - para.first_left, para.right - para.left)
+    if not lines:
+        return None
+
+    leading = para.leading
+    extra = len(lines) - len(para.baselines)
+    if extra > 0 and extra * leading > para.room_below:
+        # Pas la place d'ajouter les lignes : reste à resserrer l'interligne.
+        span = para.baselines[-1] - para.baselines[0] + para.room_below
+        squeezed = span / (len(lines) - 1) if len(lines) > 1 else leading
+        if squeezed < leading * MIN_LEADING_SQUEEZE:
+            return None
+        leading = squeezed
+    return ReflowPlan(para=para, lines=lines, leading=leading, font=font, size=para.size)
+
+
+def run_reflow(page: fitz.Page, plan: ReflowPlan) -> None:
+    """Écrit les lignes recomposées. Le caviardage a déjà eu lieu."""
+    para = plan.para
+    y = para.baselines[0]
+    for index, line in enumerate(plan.lines):
+        x = para.first_left if index == 0 else para.left
+        _write_line(page, fitz.Point(x, y), line, plan.font, plan.size, para.color)
+        y += plan.leading
+
+
 def resolve_edits(
     doc: fitz.Document, requests: list[dict]
 ) -> tuple[dict[str, EditSpec], list[dict]]:
@@ -420,9 +655,22 @@ class EditResult:
 
     changed: int = 0
     approximated: int = 0   # fragments dont la typographie a dû être approchée
+    reflowed: int = 0       # paragraphes recomposés au lieu d'être rétrécis
 
     def __bool__(self) -> bool:
         return bool(self.changed)
+
+
+def _overflows(item: TextItem, text: str, resolver: FontResolver, style: Style | None) -> bool:
+    """Le nouveau texte dépasse-t-il la place disponible sur la ligne ?"""
+    clean = text.replace("\n", " ").rstrip()
+    if not clean:
+        return False
+    if style is not None and style.family:
+        font, _ = fonts.choice_font(style.family, style.bold, style.italic)
+    else:
+        font, _ = resolver.resolve(item.page, item.fontname, item.font, clean)
+    return font.text_length(clean, fontsize=item.size) > max(item.max_x - item.bbox[0], 1.0)
 
 
 def apply_edits(doc: fitz.Document, edits: dict[str, EditSpec | str]) -> EditResult:
@@ -446,9 +694,39 @@ def apply_edits(doc: fitz.Document, edits: dict[str, EditSpec | str]) -> EditRes
     result = EditResult()
     for pno, pairs in by_page.items():
         page = doc[pno]
-        _erase(page, (fitz.Rect(item.bbox) for item, _ in pairs))
+        raw = _page_dict(page)
+
+        # Deux modifications dans un même bloc : le recomposer n'appliquerait que
+        # l'une des deux, on s'en abstient.
+        blocks = [item.id.split("-")[1] for item, _ in pairs]
+        alone = {b for b in blocks if blocks.count(b) == 1}
+
+        # Le plan de reflux se calcule avant tout effacement : une fois le
+        # paragraphe caviardé, il est trop tard pour changer d'avis.
+        plans: list[tuple[TextItem, EditSpec, ReflowPlan | None]] = []
         for item, spec in pairs:
-            if not _write(page, item, spec.text, resolver, spec.style):
+            plan = None
+            if (
+                item.id.split("-")[1] in alone
+                and spec.style is None
+                and _overflows(item, spec.text, resolver, spec.style)
+            ):
+                plan = plan_reflow(page, raw, item, spec.text, resolver)
+            plans.append((item, spec, plan))
+
+        rects: list[fitz.Rect] = []
+        for item, _, plan in plans:
+            if plan is None:
+                rects.append(fitz.Rect(item.bbox))
+            else:
+                rects.extend(fitz.Rect(b) for b in plan.para.line_bboxes)
+        _erase(page, rects)
+
+        for item, spec, plan in plans:
+            if plan is not None:
+                run_reflow(page, plan)
+                result.reflowed += 1
+            elif not _write(page, item, spec.text, resolver, spec.style):
                 result.approximated += 1
             result.changed += 1
     return result

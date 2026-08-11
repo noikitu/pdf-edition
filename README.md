@@ -4,8 +4,10 @@ Application web **gratuite** pour corriger le texte d'un PDF comme dans un trait
 texte : on clique sur une phrase, on la réécrit, on télécharge le PDF corrigé.
 100 % Python (FastAPI + PyMuPDF) côté serveur, aucune dépendance JavaScript côté client.
 
-Les fichiers ne quittent jamais la machine sur laquelle l'application tourne : ils sont
-gardés en mémoire le temps de la session, jamais écrits sur disque.
+Les fichiers ne quittent jamais la machine sur laquelle l'application tourne. Le document
+en cours y est sauvegardé (`~/.lemonpdf/sessions`) afin de survivre à un redémarrage du
+serveur ; fermer le document efface cette sauvegarde, et `LEMONPDF_AUTOSAVE=0` revient à
+un fonctionnement strictement en mémoire.
 
 ## Démarrage
 
@@ -48,6 +50,8 @@ Tout se règle par variables d'environnement, sans toucher au code :
 | `LEMONPDF_SESSION_TTL` | `21600` | durée de vie d'un document inactif, en secondes |
 | `LEMONPDF_MAX_SESSIONS` | `40` | documents gardés en mémoire simultanément |
 | `LEMONPDF_OPEN_BROWSER` | `1` | ouvrir le navigateur au démarrage |
+| `LEMONPDF_AUTOSAVE` | `1` | sauvegarder les documents en cours sur disque |
+| `LEMONPDF_DATA_DIR` | `~/.lemonpdf` | où sont écrites ces sauvegardes |
 
 Un point à connaître : **un seul worker**. Les documents en cours d'édition vivent dans
 la mémoire du processus, un second worker ne les verrait pas — d'où `workers=1` dans
@@ -134,8 +138,25 @@ fragment déclenche côté serveur :
 3. un nouveau rendu de la page, qui sert de retour visuel — ce que l'on voit est donc
    exactement le contenu du PDF, pas une simulation.
 
-Si le texte saisi est plus long que la place disponible, la taille est réduite
-progressivement (jusqu'à 75 % au maximum) pour ne pas déborder sur le fragment suivant.
+### Quand le texte ne rentre plus
+
+Si le texte saisi dépasse la place disponible, le **paragraphe entier est recomposé** :
+ses retours à la ligne sont recalculés, et il gagne une ligne s'il y a de la place en
+dessous. À défaut, l'interligne est resserré de 10 % au maximum.
+
+Recomposer est refusé — et la taille de police est alors réduite, jusqu'à 75 %, comme
+avant — dès que l'opération risquerait de perdre quelque chose :
+
+- **plusieurs styles** dans le paragraphe : un mot en gras serait aplati ;
+- une **césure** en fin de ligne : impossible de savoir si `bien-` + `être` formait un mot
+  coupé ou un mot composé ;
+- des **indices de rupture interne** — interligne élargi, ligne en alinéa, ligne courte en
+  plein milieu. Un « bloc » PyMuPDF n'est pas toujours un paragraphe : deux paragraphes
+  rapprochés peuvent y être regroupés, et les recomposer ensemble les fondrait en un seul ;
+- **pas assez de place** sous le paragraphe, ou deux modifications dans le même paragraphe.
+
+La recomposition est décidée entièrement avant le moindre caviardage : effacer le
+paragraphe pour découvrir ensuite qu'il ne se recompose pas perdrait ses autres lignes.
 
 ### Le choix de la police
 

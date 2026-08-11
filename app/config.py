@@ -39,3 +39,11 @@ MAX_SESSIONS = _int("LEMONPDF_MAX_SESSIONS", 40)
 
 # Ouvrir le navigateur au démarrage : pratique en local, à couper en conteneur.
 OPEN_BROWSER = _flag("LEMONPDF_OPEN_BROWSER", True)
+
+# Sauvegarde des documents en cours sur disque, pour survivre à un redémarrage.
+# Couper cette option ramène l'application à un fonctionnement strictement en
+# mémoire : rien n'est écrit, mais tout est perdu à l'arrêt du serveur.
+AUTOSAVE = _flag("LEMONPDF_AUTOSAVE", True)
+DATA_DIR = os.environ.get("LEMONPDF_DATA_DIR") or os.path.join(
+    os.path.expanduser("~"), ".lemonpdf"
+)

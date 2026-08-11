@@ -8,19 +8,36 @@ import uuid
 
 import fitz
 
+from . import persist
 from .config import MAX_SESSIONS, SESSION_TTL
 
 MAX_HISTORY = 25          # nombre d'états conservés pour l'annulation
 
 
 class Session:
-    def __init__(self, name: str, data: bytes):
+    def __init__(self, name: str, data: bytes, doc_id: str = ""):
+        self.doc_id = doc_id
         self.name = name
         self.doc = fitz.open(stream=data, filetype="pdf")
         self.undo_stack: list[bytes] = []
         self.redo_stack: list[bytes] = []
         self.version = 0
+        self.saved_version = -1
         self.touched = time.time()
+
+    def autosave(self) -> None:
+        """Écrit l'état courant s'il a changé depuis la dernière sauvegarde.
+
+        Appelé au terme de chaque requête qui modifie le document. Sérialiser
+        coûte ici ce que coûte déjà l'instantané d'annulation, pris à chaque
+        modification lui aussi.
+        """
+        if not persist.enabled() or self.saved_version == self.version:
+            return
+        persist.save(
+            self.doc_id, self.name, self.doc.tobytes(garbage=3, deflate=True), self.version
+        )
+        self.saved_version = self.version
 
     # -- historique ---------------------------------------------------------
     def snapshot(self) -> None:
@@ -74,26 +91,51 @@ class Store:
         self._lock = threading.Lock()
 
     def create(self, name: str, data: bytes) -> tuple[str, Session]:
-        session = Session(name, data)
         doc_id = uuid.uuid4().hex
+        session = Session(name, data, doc_id)
         with self._lock:
             self._sessions[doc_id] = session
         self.purge()
         self._evict()
+        session.autosave()
         return doc_id, session
 
     def get(self, doc_id: str) -> Session | None:
         with self._lock:
             session = self._sessions.get(doc_id)
+        if session is None:
+            session = self._reopen(doc_id)
         if session:
             session.touched = time.time()
         return session
 
+    def _reopen(self, doc_id: str) -> Session | None:
+        """Recharge un document depuis le disque.
+
+        Sert à la reprise après un redémarrage, mais aussi quand une session a été
+        évincée faute de place : le document revient de lui-même au premier accès.
+        L'historique d'annulation, lui, n'est pas conservé.
+        """
+        saved = persist.load(doc_id)
+        if saved is None:
+            return None
+        name, data = saved
+        try:
+            session = Session(name, data, doc_id)
+        except Exception:
+            return None
+        session.saved_version = session.version
+        with self._lock:
+            self._sessions[doc_id] = session
+        return session
+
     def drop(self, doc_id: str) -> None:
+        """Ferme un document et efface sa sauvegarde : la fermeture est explicite."""
         with self._lock:
             session = self._sessions.pop(doc_id, None)
         if session:
             session.close()
+        persist.drop(doc_id)
 
     def purge(self) -> None:
         cutoff = time.time() - SESSION_TTL
@@ -102,12 +144,15 @@ class Store:
             dropped = [self._sessions.pop(k) for k in stale]
         for session in dropped:
             session.close()
+        persist.purge()
 
     def _evict(self) -> None:
         """Garde au plus MAX_SESSIONS documents ouverts, en fermant les plus anciens.
 
         Les documents résident en mémoire : sans cette borne, une instance
-        partagée finirait par gonfler jusqu'à se faire tuer par l'hébergeur.
+        partagée finirait par gonfler jusqu'à se faire tuer par l'hébergeur. La
+        sauvegarde sur disque est conservée — un accès ultérieur rouvrira le
+        document sans que l'utilisateur s'aperçoive de rien.
         """
         with self._lock:
             excess = len(self._sessions) - MAX_SESSIONS

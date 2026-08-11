@@ -10,37 +10,23 @@
 <body>
 
 <header class="toolbar">
-  <div class="brand">
-    <span class="brand-mark glass-lemon">🍋</span>
-    <span class="brand-name">LemonPDF</span>
-  </div>
+  <!-- Le citron ouvre le menu latéral : document, remplacement, pages, export. -->
+  <button id="btn-menu" class="brand-mark glass-lemon" title="Menu" aria-expanded="false">🍋</button>
 
   <span class="sep" id="brand-sep"></span>
 
+  <!-- Outils de dessin : une icône chacun, à gauche. -->
   <div class="group" id="doc-tools" hidden>
-    <button id="btn-undo" title="Annuler (Ctrl+Z)" disabled>↶</button>
-    <button id="btn-redo" title="Rétablir (Ctrl+Maj+Z)" disabled>↷</button>
+    <button id="btn-undo" class="icon" title="Annuler (Ctrl+Z)" disabled>↶</button>
+    <button id="btn-redo" class="icon" title="Rétablir (Ctrl+Maj+Z)" disabled>↷</button>
     <span class="sep"></span>
-    <button id="btn-zoom-out" title="Dézoomer">−</button>
-    <span id="zoom-label">100 %</span>
-    <button id="btn-zoom-in" title="Zoomer">+</button>
-    <button id="btn-lens" title="Loupe : grossit sous le curseur (molette pour régler)">🔍</button>
-    <span class="sep"></span>
-    <button id="btn-add" title="Ajouter un texte">＋ Texte</button>
-    <button id="btn-highlight" title="Surligner un texte">🖍 Surligner</button>
-    <label class="merge-btn" id="btn-image" title="Insérer une image ou une signature">
-      ✍ Image
+    <button id="btn-add" class="icon" title="Ajouter un texte"><span class="ic-aa">Aa</span></button>
+    <button id="btn-highlight" class="icon" title="Surligner un texte">🖊</button>
+    <label id="btn-image" class="icon" title="Insérer une image ou une signature">
+      🖼
       <input id="image-input" type="file" accept="image/png,image/jpeg,image/gif,image/bmp,image/tiff,.png,.jpg,.jpeg" hidden>
     </label>
-    <button id="btn-redact" title="Effacer ou noircir une zone">▮ Caviarder</button>
-    <button id="btn-find" title="Rechercher et remplacer (Ctrl+F)">Remplacer</button>
-    <button id="btn-pages" title="Extraire des pages">⌸ Pages</button>
-    <button id="btn-assist" title="Faire relire le texte par un LLM">✨ Assistant</button>
-    <button id="btn-compress" title="Réduire le poids du PDF">🍋 Compresser</button>
-    <label class="merge-btn" id="btn-merge" title="Ajouter les pages d'un autre PDF">
-      ⧉ Fusionner
-      <input id="merge-input" type="file" accept="application/pdf,.pdf" hidden>
-    </label>
+    <button id="btn-redact" class="icon" title="Effacer ou noircir une zone"><span class="ic-rect"></span></button>
   </div>
 
   <div class="spacer"></div>
@@ -50,10 +36,34 @@
   <div class="group" id="doc-actions" hidden>
     <span class="filename" id="filename"></span>
     <span class="badge" id="mod-count" hidden></span>
-    <button id="btn-download" class="primary">↓ Télécharger</button>
-    <button id="btn-close" title="Fermer le document">✕</button>
+    <button id="btn-assist" class="primary" title="Faire relire le texte par un LLM">✨ Assistant</button>
+    <button id="btn-close" class="icon" title="Fermer le document">✕</button>
   </div>
 </header>
+
+<!-- Menu latéral, ouvert par le citron. Pas d'attribut `hidden` : il coulisse
+     hors de l'écran, la règle `[hidden] { display: none !important }` empêcherait
+     toute transition. -->
+<div id="scrim" class="scrim"></div>
+<aside id="sidebar" class="sidebar">
+  <div class="side-head">
+    <button id="btn-menu-close" class="icon" title="Fermer le menu">✕</button>
+  </div>
+
+  <nav id="sidebar-actions" class="side-nav" hidden>
+    <button id="btn-find">Rechercher et remplacer</button>
+    <button id="btn-pages">Pages</button>
+    <label id="btn-merge">
+      Fusionner un PDF
+      <input id="merge-input" type="file" accept="application/pdf,.pdf" hidden>
+    </label>
+    <button id="btn-compress">Compresser</button>
+    <span class="side-gap"></span>
+    <button id="btn-download" class="primary">↓ Télécharger</button>
+  </nav>
+
+  <p class="side-empty">Ouvrez un PDF pour accéder aux outils.</p>
+</aside>
 
 <div id="find-panel" class="panel" hidden>
   <label>Rechercher <input id="find-search" type="text" placeholder="texte à corriger"></label>
@@ -137,7 +147,7 @@
       </label>
       <ul class="hints">
         <li>Cliquez sur un texte de la page pour le corriger</li>
-        <li>« Remplacer » corrige un mot dans tout le document</li>
+        <li>Le citron, en haut à gauche, ouvre le menu</li>
         <li>Ctrl+Z pour annuler, puis téléchargez le PDF modifié</li>
       </ul>
     </div>
@@ -146,17 +156,21 @@
   <section id="viewer" class="viewer" hidden></section>
 </main>
 
+<!-- Zoom et loupe : posés en bas à droite, hors du chemin de la barre d'outils. -->
+<div id="viewdock" class="viewdock" hidden>
+  <button id="btn-zoom-out" class="icon" title="Dézoomer">−</button>
+  <span id="zoom-label">100 %</span>
+  <button id="btn-zoom-in" class="icon" title="Zoomer">+</button>
+  <span class="sep"></span>
+  <button id="btn-lens" class="icon" title="Loupe : grossit sous le curseur (molette pour régler)">🔍</button>
+</div>
+
 <div id="overlay" class="overlay" hidden>
   <div class="spinner"></div>
-  <!-- Pas d'attribut `hidden` ici : la visibilité est pilotée par la classe
-       `squeezing` de l'overlay. Un `hidden` ne serait jamais retiré par le script,
-       et la règle `[hidden] { display: none !important }` le masquerait pour de bon. -->
   <img class="squeeze-photo" src="/squeezing.png" alt="Une main pressant un demi-citron">
-
   <span id="overlay-text">Chargement…</span>
 </div>
-<!-- Loupe : chaque anneau reprend l'image du disque (background: inherit) avec un
-     grossissement croissant vers le bord, ce qui imite la compression du verre. -->
+
 <div id="lens" class="lens" hidden>
   <i class="lens-ring r1"></i>
   <i class="lens-ring r2"></i>

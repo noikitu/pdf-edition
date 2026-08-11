@@ -76,7 +76,7 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 14px 22px;
+  padding: 12px 16px;
   border-left: none;
   border-right: none;
   border-top: none;
@@ -84,6 +84,10 @@ body {
   position: sticky;
   top: 0;
   z-index: 30;
+  /* Rien ne doit dépasser de l'écran : la barre ne s'élargit jamais au-delà de
+     la fenêtre, et c'est le nom du fichier qui cède en premier (voir .filename). */
+  min-width: 0;
+  overflow: hidden;
 }
 
 .glass-lemon {
@@ -94,28 +98,30 @@ body {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .9), 0 8px 20px rgba(214, 196, 0, .35);
 }
 
-.brand { display: flex; align-items: center; gap: 9px; }
+/* Le citron : bouton d'ouverture du menu, sans rien autour. */
 .brand-mark {
-  width: 26px;
-  height: 26px;
-  border-radius: 8px;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 11px;
   display: grid;
   place-items: center;
-  font-size: 13px;
+  font-size: 17px;
+  line-height: 1;
   flex: none;
+  cursor: pointer;
 }
-.brand-name {
-  font: 600 16px/1 'Helvetica Neue', Helvetica, Arial, sans-serif;
-  letter-spacing: -.01em;
-  white-space: nowrap;
-}
+.brand-mark[aria-expanded="true"] { box-shadow: inset 0 1px 0 rgba(255, 255, 255, .9), 0 0 0 2px rgba(214, 196, 0, .6); }
 
-.spacer { flex: 1; }
-.group { display: flex; align-items: center; gap: 7px; }
-.sep { width: 1px; height: 20px; background: var(--hairline); margin: 0 4px; }
+.spacer { flex: 1; min-width: 6px; }
+.group { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.sep { width: 1px; height: 20px; background: var(--hairline); margin: 0 2px; flex: none; }
 
+/* Seul élément autorisé à rétrécir puis disparaître quand la place manque. */
 .filename {
-  max-width: 240px;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 200px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -160,10 +166,51 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, .8); }
 button:disabled { color: #b7b7aa; opacity: .6; cursor: default; }
 
 /* boutons portant un libellé plutôt qu'un pictogramme */
-#btn-add, #btn-find, #btn-compress, #btn-count, #btn-redact, #btn-assist, .newbox .cancel {
+#btn-count, .newbox .cancel {
   font-weight: 500;
   font-size: 13px;
   padding: 9px 13px;
+}
+
+/* Outils : un carré, une icône. Les <label> qui masquent un input de fichier
+   doivent imiter les vrais boutons, d'où la règle partagée. */
+button.icon, label.icon {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  font-size: 15px;
+  line-height: 1;
+  flex: none;
+  border-radius: 10px;
+}
+label.icon {
+  color: var(--ink);
+  background: rgba(255, 255, 255, .55);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, .8);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .95), 0 3px 8px rgba(0, 0, 0, .07);
+  cursor: pointer;
+  transition: background .14s, box-shadow .14s;
+}
+label.icon:hover { background: rgba(255, 255, 255, .8); }
+label.icon.active {
+  background: rgba(255, 255, 255, .9);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .95), 0 0 0 1.5px rgba(214, 196, 0, .55);
+}
+
+.ic-aa {
+  font: 600 14px/1 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  letter-spacing: -.02em;
+}
+/* Caviarder : le rectangle plein dit exactement ce que fait l'outil. */
+.ic-rect {
+  width: 17px;
+  height: 11px;
+  border-radius: 2px;
+  background: #24241f;
 }
 
 button.primary {
@@ -183,7 +230,9 @@ button.active {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, .95), 0 0 0 1.5px rgba(214, 196, 0, .55);
 }
 
-#btn-close { color: var(--muted); padding: 9px 12px; font-size: 13px; }
+/* Pas de `padding` ici : l'identifiant l'emporterait sur `.icon`, qui met le
+   bouton au carré. */
+#btn-close { color: var(--muted); }
 
 #zoom-label {
   font: 400 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -205,7 +254,7 @@ button.active {
   border-top: none;
   border-radius: 0;
   position: sticky;
-  top: 64px;          /* hauteur de .toolbar : 14px + 36px + 14px */
+  top: 58px;          /* hauteur de .toolbar : 12px + 34px + 12px */
   z-index: 29;
 }
 .panel label {
@@ -317,26 +366,103 @@ button.active {
 #assist-list .goto { padding: 5px 8px; font-size: 12px; }
 #assist-list .pick { padding-top: 2px; }
 
-/* le bouton Fusionner est un <label> : il doit imiter les vrais boutons */
-.merge-btn {
-  display: inline-block;
-  font: 500 13px/1 'Helvetica Neue', Helvetica, Arial, sans-serif;
+/* ------------------------------------------------------------ menu latéral */
+
+/* Le panneau coulisse hors du cadre plutôt que de disparaître : c'est ce qui
+   permet la transition. `visibility` évite qu'il reste atteignable au clavier
+   une fois refermé. */
+.sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 292px;
+  max-width: 84vw;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  background: rgba(255, 255, 255, .72);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border-right: 1px solid rgba(255, 255, 255, .8);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, .18);
+  transform: translateX(-102%);
+  visibility: hidden;
+  transition: transform .22s ease, visibility .22s;
+}
+.sidebar.open { transform: none; visibility: visible; }
+
+.side-head { display: flex; justify-content: flex-end; }
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  background: rgba(30, 30, 20, .18);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .22s ease;
+}
+.scrim.open { opacity: 1; pointer-events: auto; }
+
+.side-nav { display: flex; flex-direction: column; gap: 6px; }
+.side-gap { height: 8px; }
+
+/* Le « Fusionner » est un <label> autour d'un input fichier : mêmes styles que
+   ses voisins, sinon il jurerait dans la liste. */
+.side-nav button, .side-nav label {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: 500 14px/1 'Helvetica Neue', Helvetica, Arial, sans-serif;
   color: var(--ink);
-  background: rgba(255, 255, 255, .55);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  border: 1px solid rgba(255, 255, 255, .8);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .95), 0 3px 8px rgba(0, 0, 0, .07);
-  border-radius: var(--r-btn);
-  padding: 9px 13px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .6);
+  border: 1px solid rgba(255, 255, 255, .85);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .9);
   cursor: pointer;
   transition: background .14s;
 }
-.merge-btn:hover { background: rgba(255, 255, 255, .8); }
-.merge-btn.active {
-  background: rgba(255, 255, 255, .9);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .95), 0 0 0 1.5px rgba(214, 196, 0, .55);
+.side-nav button:hover, .side-nav label:hover { background: #fff; }
+.side-nav button.active { box-shadow: inset 0 1px 0 rgba(255, 255, 255, .9), 0 0 0 1.5px rgba(214, 196, 0, .55); }
+.side-nav button.primary {
+  text-align: center;
+  font-weight: 600;
+  background: linear-gradient(180deg, rgba(255, 255, 160, .95), rgba(255, 255, 125, .85));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .9), 0 8px 20px rgba(214, 196, 0, .35);
 }
+
+.side-empty {
+  margin: 0;
+  padding: 0 4px;
+  font: 400 13px/1.5 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  color: var(--muted-soft);
+}
+/* Un document ouvert : la liste remplace le message d'invite. */
+.sidebar:has(#sidebar-actions:not([hidden])) .side-empty { display: none; }
+
+/* ------------------------------------------------- zoom et loupe, en bas à droite */
+
+.viewdock {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px;
+  border-radius: 14px;
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: var(--glass-border);
+  box-shadow: var(--glass-shadow), 0 10px 26px rgba(0, 0, 0, .12);
+}
+.viewdock #zoom-label { min-width: 50px; }
 
 /* ------------------------------------------------------------ dépôt fichier */
 
@@ -887,10 +1013,13 @@ button.active {
 
 @media (max-width: 760px) {
   .filename, .idle-note { display: none; }
-  .brand-name { display: none; }
-  .toolbar { padding: 12px 14px; gap: 8px; }
-  .panel { padding: 10px 14px; top: 60px; }
+  .toolbar { padding: 10px 12px; gap: 6px; }
+  .panel { padding: 10px 14px; top: 58px; }
   .panel input[type=text] { min-width: 140px; }
   .dz-inner { padding: 40px 26px; }
   .dz-inner h1 { font-size: 28px; }
+  .viewdock { right: 10px; bottom: 10px; }
+  /* le libellé du bouton Assistant cède avant les icônes d'outils */
+  #btn-assist { font-size: 0; padding: 0; width: 34px; height: 34px; }
+  #btn-assist::before { content: "✨"; font-size: 15px; }
 }

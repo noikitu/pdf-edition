@@ -56,6 +56,11 @@ const el = {
   pagesPanel: $('#pages-panel'),
   extractSpec: $('#extract-spec'),
   pagesInfo: $('#pages-info'),
+  menu: $('#btn-menu'),
+  sidebar: $('#sidebar'),
+  scrim: $('#scrim'),
+  sideActions: $('#sidebar-actions'),
+  dock: $('#viewdock'),
   lens: $('#lens'),
   lensBtn: $('#btn-lens'),
   prevHit: $('#btn-prev-hit'),
@@ -116,6 +121,26 @@ const postJSON = (path, body) => api(path, {
   body: JSON.stringify(body),
 });
 
+/* -------------------------------------------------------------- menu latéral */
+
+function setMenu(open) {
+  el.sidebar.classList.toggle('open', open);
+  el.scrim.classList.toggle('open', open);
+  el.menu.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+
+const menuOpen = () => el.sidebar.classList.contains('open');
+
+el.menu.addEventListener('click', () => setMenu(!menuOpen()));
+el.scrim.addEventListener('click', () => setMenu(false));
+$('#btn-menu-close').addEventListener('click', () => setMenu(false));
+
+// Une action choisie dans le menu le referme : les panneaux qu'elle ouvre se
+// trouvent sous la barre d'outils, que le menu recouvrirait.
+el.sideActions.addEventListener('click', (e) => {
+  if (e.target.closest('button, label')) setMenu(false);
+});
+
 /* ----------------------------------------------------------------- upload */
 
 el.fileInput.addEventListener('change', () => {
@@ -149,6 +174,8 @@ async function openFile(file) {
     el.viewer.hidden = false;
     el.docTools.hidden = false;
     el.docActions.hidden = false;
+    el.sideActions.hidden = false;
+    el.dock.hidden = false;
     el.filename.textContent = data.name;
     buildPages();
     toast(`${data.pages.length} page(s) chargée(s)`);
@@ -1366,6 +1393,9 @@ $('#btn-close').addEventListener('click', async () => {
   el.dropzone.hidden = false;
   el.docTools.hidden = true;
   el.docActions.hidden = true;
+  el.sideActions.hidden = true;
+  el.dock.hidden = true;
+  setMenu(false);
   toggleFind(false);
   togglePages(false);
   toggleAssist(false);
@@ -1380,6 +1410,7 @@ $('#btn-close').addEventListener('click', async () => {
 document.addEventListener('keydown', (e) => {
   // Échap quitte le mode en cours ; l'édition d'un fragment gère sa propre
   // touche Échap, on ne lui marche donc pas dessus.
+  if (e.key === 'Escape' && menuOpen()) { setMenu(false); return; }
   const inMode = state.adding || state.highlighting || state.redacting || state.placing;
   if (e.key === 'Escape' && !state.editing && (inMode || state.lens)) {
     if (inMode) setMode(null);

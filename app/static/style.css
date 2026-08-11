@@ -854,14 +854,14 @@ button.active {
    pendant lequel la contraction varie de quelques millièmes. Ce tremblement est ce
    qui donne l'impression d'un effort tenu plutôt que d'une pulsation régulière. */
 @keyframes squeeze-press {
-  0%, 8%   { transform: scale(1, 1); }
-  20%      { transform: scale(1.055, .944); }
-  31%      { transform: scale(1.048, .952); }
-  44%      { transform: scale(1.063, .936); }
-  57%      { transform: scale(1.052, .948); }
-  70%      { transform: scale(1.061, .938); }
-  78%      { transform: scale(1.058, .941); }
-  92%, 100% { transform: scale(1, 1); }
+  0%, 6%    { transform: scale(1, 1) translateY(0) rotate(0deg); }
+  18%       { transform: scale(1.13, .87) translateY(5px) rotate(-1deg); }
+  28%       { transform: scale(1.105, .895) translateY(4px) rotate(-.6deg); }
+  42%       { transform: scale(1.15, .85) translateY(7px) rotate(-1.4deg); }
+  55%       { transform: scale(1.115, .885) translateY(5px) rotate(-.8deg); }
+  68%       { transform: scale(1.145, .855) translateY(7px) rotate(-1.3deg); }
+  79%       { transform: scale(1.125, .875) translateY(6px) rotate(-1deg); }
+  93%, 100% { transform: scale(1, 1) translateY(0) rotate(0deg); }
 }
 
 @media (prefers-reduced-motion: reduce) {

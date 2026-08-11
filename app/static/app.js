@@ -70,13 +70,56 @@ const el = {
 
 /* ------------------------------------------------------------------ utils */
 
+/* L'écran d'attente n'apparaît qu'au bout de BUSY_DELAY : une opération plus
+   rapide se termine sans rien afficher, ce qui évite le clignotement. Et s'il est
+   apparu, il reste au moins BUSY_MIN à l'écran — sans quoi une opération de 250 ms
+   produirait exactement le clignotement qu'on cherche à supprimer. */
+const BUSY_DELAY = 220;
+const BUSY_MIN = 450;
+const BUSY_FADE = 200;   // doit correspondre à la transition CSS de .overlay
+
 let busyCount = 0;
-/** `mode: 'squeeze'` bascule l'overlay sur l'illustration citron pressé. */
+let showTimer = null;
+let hideTimer = null;
+let shownAt = 0;
+
+/** `mode: 'squeeze'` bascule l'overlay sur l'illustration du citron pressé. */
 function busy(on, text, mode) {
   busyCount = Math.max(0, busyCount + (on ? 1 : -1));
-  el.overlayText.textContent = text || 'Traitement…';
-  el.overlay.hidden = busyCount === 0;
-  if (busyCount === 0 || mode) el.overlay.classList.toggle('squeezing', mode === 'squeeze');
+
+  if (on) {
+    el.overlayText.textContent = text || 'Traitement…';
+    el.overlay.classList.toggle('squeezing', mode === 'squeeze');
+    if (busyCount === 1) {
+      clearTimeout(hideTimer);
+      clearTimeout(showTimer);
+      showTimer = setTimeout(showOverlay, BUSY_DELAY);
+    }
+    return;
+  }
+
+  if (busyCount > 0) return;          // une autre opération est encore en cours
+  clearTimeout(showTimer);
+  if (!shownAt) return;               // jamais affiché : rien à retirer
+  clearTimeout(hideTimer);
+  hideTimer = setTimeout(hideOverlay, Math.max(0, BUSY_MIN - (Date.now() - shownAt)));
+}
+
+function showOverlay() {
+  shownAt = Date.now();
+  el.overlay.hidden = false;
+  // Sans lecture forcée de la mise en page, le navigateur applique `hidden` et
+  // la classe dans la même passe : l'opacité sauterait à 1 sans transition.
+  void el.overlay.offsetHeight;
+  el.overlay.classList.add('on');
+}
+
+function hideOverlay() {
+  shownAt = 0;
+  el.overlay.classList.remove('on');
+  hideTimer = setTimeout(() => {
+    if (!busyCount) el.overlay.hidden = true;
+  }, BUSY_FADE);
 }
 
 let toastTimer;

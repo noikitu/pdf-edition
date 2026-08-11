@@ -256,6 +256,14 @@ button.active {
   position: sticky;
   top: 58px;          /* hauteur de .toolbar : 12px + 34px + 12px */
   z-index: 29;
+  /* Les panneaux passent de `display: none` à visible : l'animation se joue donc
+     à chaque ouverture, sans qu'aucun script ait à la déclencher. */
+  animation: panel-drop .22s cubic-bezier(.2, .7, .3, 1);
+}
+
+@keyframes panel-drop {
+  from { opacity: 0; transform: translateY(-12px); }
+  to { opacity: 1; transform: none; }
 }
 .panel label {
   display: flex;
@@ -295,6 +303,24 @@ button.active {
 /* Contrairement aux autres, ce panneau empile plusieurs rangées et une liste de
    propositions : il passe donc en colonne et devient défilable. */
 .panel.assist { flex-direction: column; align-items: stretch; gap: 10px; max-height: 72vh; overflow: auto; }
+
+/* Le panneau étant nettement plus haut, ses rangées se posent l'une après l'autre
+   plutôt que d'apparaître d'un bloc. */
+.panel.assist { animation-duration: .28s; }
+.panel.assist > * { animation: assist-row .34s cubic-bezier(.2, .7, .3, 1) backwards; }
+.panel.assist > *:nth-child(1) { animation-delay: .04s; }
+.panel.assist > *:nth-child(2) { animation-delay: .10s; }
+.panel.assist > *:nth-child(3) { animation-delay: .16s; }
+.panel.assist > *:nth-child(4) { animation-delay: .22s; }
+
+@keyframes assist-row {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel, .panel.assist > * { animation: none; }
+}
 .assist-row { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
 .assist-row .grow { flex: 1; min-width: 260px; }
 .panel.assist select {
@@ -926,6 +952,9 @@ button.active {
 
 /* ------------------------------------------------------------------ divers */
 
+/* L'apparition et la disparition sont fondues. Le déclenchement, lui, est retardé
+   côté script : une opération de quelques dizaines de millisecondes ne doit rien
+   afficher du tout, plutôt que de faire clignoter l'écran. */
 .overlay {
   position: fixed;
   inset: 0;
@@ -940,7 +969,10 @@ button.active {
   background: rgba(251, 253, 249, .6);
   backdrop-filter: blur(6px) saturate(1.3);
   -webkit-backdrop-filter: blur(6px) saturate(1.3);
+  opacity: 0;
+  transition: opacity .2s ease;
 }
+.overlay.on { opacity: 1; }
 .overlay:not(.squeezing) { flex-direction: row; }
 .spinner {
   width: 20px;
@@ -955,7 +987,61 @@ button.active {
 /* -------------------------------------------------- « pressage » du citron */
 
 .overlay.squeezing .spinner { display: none; }
-.overlay:not(.squeezing) .squeeze-photo { display: none; }
+.overlay:not(.squeezing) .squeeze-stage { display: none; }
+
+/* La scène porte la photo et les gouttes : celles-ci partent du citron, qui se
+   trouve à droite du centre du cadre. */
+.squeeze-stage { position: relative; display: block; }
+.juice {
+  position: absolute;
+  left: 58%;
+  top: 48%;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+.juice i {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: var(--s);
+  height: calc(var(--s) * .78);
+  margin: calc(var(--s) * -.39) 0 0 calc(var(--s) * -.5);
+  border-radius: 50%;
+  background: radial-gradient(circle at 32% 30%, #fffbdc, #f6dc55 70%, #e9c73a);
+  box-shadow: 0 0 4px rgba(246, 220, 85, .6);
+  opacity: 0;
+  /* même durée que la pression : la projection tombe donc toujours sur le serrage */
+  animation: juice-fly 2.6s cubic-bezier(.15, .6, .3, 1) infinite;
+  animation-delay: var(--t);
+}
+
+/* Projection : la goutte jaillit, ralentit, s'étire et s'éteint. `rotate` fixe la
+   direction, `translateX` la distance parcourue — d'où une gerbe radiale. */
+@keyframes juice-fly {
+  0%   { opacity: 0; transform: rotate(var(--a)) translateX(4px) scale(.35); }
+  6%   { opacity: 1; transform: rotate(var(--a)) translateX(calc(var(--d) * .42)) scale(1.05); }
+  16%  { opacity: .95; transform: rotate(var(--a)) translateX(calc(var(--d) * .82)) scale(.9); }
+  27%  { opacity: 0; transform: rotate(var(--a)) translateX(var(--d)) scale(.55); }
+  100% { opacity: 0; transform: rotate(var(--a)) translateX(var(--d)) scale(.55); }
+}
+
+.juice i:nth-child(1)  { --a: -96deg; --d: 128px; --s: 9px;  --t: .40s; }
+.juice i:nth-child(2)  { --a: -62deg; --d: 104px; --s: 7px;  --t: .46s; }
+.juice i:nth-child(3)  { --a: -34deg; --d: 142px; --s: 11px; --t: .42s; }
+.juice i:nth-child(4)  { --a: -12deg; --d: 118px; --s: 8px;  --t: .52s; }
+.juice i:nth-child(5)  { --a: 14deg;  --d: 150px; --s: 10px; --t: .44s; }
+.juice i:nth-child(6)  { --a: 38deg;  --d: 126px; --s: 7px;  --t: .58s; }
+.juice i:nth-child(7)  { --a: 62deg;  --d: 158px; --s: 12px; --t: .43s; }
+.juice i:nth-child(8)  { --a: 86deg;  --d: 134px; --s: 9px;  --t: .50s; }
+.juice i:nth-child(9)  { --a: 108deg; --d: 112px; --s: 7px;  --t: .62s; }
+.juice i:nth-child(10) { --a: 132deg; --d: 146px; --s: 10px; --t: .45s; }
+.juice i:nth-child(11) { --a: 156deg; --d: 120px; --s: 8px;  --t: .55s; }
+.juice i:nth-child(12) { --a: 178deg; --d: 138px; --s: 9px;  --t: .48s; }
+.juice i:nth-child(13) { --a: -158deg; --d: 106px; --s: 6px; --t: .64s; }
+.juice i:nth-child(14) { --a: -132deg; --d: 130px; --s: 8px; --t: .47s; }
+.juice i:nth-child(15) { --a: -118deg; --d: 96px;  --s: 6px; --t: .60s; }
+.juice i:nth-child(16) { --a: 100deg; --d: 172px; --s: 6px;  --t: .41s; }
 
 /* Le fond de la photo est détouré (alpha), donc plus besoin de `multiply`, qui
    assombrissait au passage tout l'overlay derrière l'image. */
@@ -991,7 +1077,8 @@ button.active {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .squeeze-photo { animation: none; }
+  .squeeze-photo, .juice i { animation: none; }
+  .juice { display: none; }
 }
 
 .toast {

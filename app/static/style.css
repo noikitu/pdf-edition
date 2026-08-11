@@ -831,26 +831,37 @@ button.active {
 .overlay.squeezing .spinner { display: none; }
 .overlay:not(.squeezing) .squeeze-photo { display: none; }
 
-/* La photo est sur fond blanc. `multiply` le fait disparaître sur l'overlay clair
-   sans avoir à détourer l'image : le blanc laisse le fond intact, le reste s'y pose. */
+/* Le fond de la photo est détouré (alpha), donc plus besoin de `multiply`, qui
+   assombrissait au passage tout l'overlay derrière l'image. */
 .squeeze-photo {
   display: block;
-  width: 215px;
-  mix-blend-mode: multiply;
-  animation: squeeze-press 1.5s ease-in-out infinite;
+  width: 300px;
+  max-width: 62vw;
+  height: auto;
+  /* La main serre vers le citron, à droite : c'est là que doit se situer le
+     centre de la déformation, pas au milieu du cadre. */
+  transform-origin: 58% 50%;
+  filter: drop-shadow(0 14px 22px rgba(0, 0, 0, .16));
+  animation: squeeze-press 2.6s cubic-bezier(.3, .05, .2, 1) infinite;
 }
-.squeeze-photo img { display: block; width: 100%; height: auto; }
 
 #overlay-text {
   font: 600 15px/1 'Helvetica Neue', Helvetica, Arial, sans-serif;
   color: var(--ink);
 }
 
-/* La pression : le poing se referme, l'image s'écrase légèrement en hauteur. */
+/* La pression : serrage franc, puis un long maintien — plus de la moitié du cycle —
+   pendant lequel la contraction varie de quelques millièmes. Ce tremblement est ce
+   qui donne l'impression d'un effort tenu plutôt que d'une pulsation régulière. */
 @keyframes squeeze-press {
-  0%, 100% { transform: scale(1, 1); }
-  45% { transform: scale(1.05, .955); }
-  64% { transform: scale(1.05, .955); }
+  0%, 8%   { transform: scale(1, 1); }
+  20%      { transform: scale(1.055, .944); }
+  31%      { transform: scale(1.048, .952); }
+  44%      { transform: scale(1.063, .936); }
+  57%      { transform: scale(1.052, .948); }
+  70%      { transform: scale(1.061, .938); }
+  78%      { transform: scale(1.058, .941); }
+  92%, 100% { transform: scale(1, 1); }
 }
 
 @media (prefers-reduced-motion: reduce) {

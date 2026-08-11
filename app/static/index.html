@@ -151,10 +151,7 @@
   <!-- Pas d'attribut `hidden` ici : la visibilité est pilotée par la classe
        `squeezing` de l'overlay. Un `hidden` ne serait jamais retiré par le script,
        et la règle `[hidden] { display: none !important }` le masquerait pour de bon. -->
-  <picture class="squeeze-photo">
-    <source srcset="/squeezing.avif" type="image/avif">
-    <img src="/squeezing.png" alt="Une main pressant un demi-citron">
-  </picture>
+  <img class="squeeze-photo" src="/squeezing.png" alt="Une main pressant un demi-citron">
 
   <span id="overlay-text">Chargement…</span>
 </div>

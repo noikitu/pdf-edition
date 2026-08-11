@@ -26,6 +26,7 @@ const state = {
   hitQuery: null,
   lens: false,     // loupe active
   lensZoom: 2.5,   // facteur de grossissement, réglable à la molette
+  scanPages: [],   // pages sans texte extractible
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -56,6 +57,16 @@ const el = {
   pagesPanel: $('#pages-panel'),
   extractSpec: $('#extract-spec'),
   pagesInfo: $('#pages-info'),
+  notice: $('#notice'),
+  noticeText: $('#notice-text'),
+  thumbsBox: $('#thumbs-box'),
+  thumbs: $('#thumbs'),
+  formPanel: $('#form-panel'),
+  formFields: $('#form-fields'),
+  formInfo: $('#form-info'),
+  formApply: $('#btn-form-apply'),
+  signModal: $('#sign-modal'),
+  signCanvas: $('#sign-canvas'),
   menu: $('#btn-menu'),
   sidebar: $('#sidebar'),
   scrim: $('#scrim'),
@@ -221,6 +232,8 @@ async function openFile(file) {
     el.dock.hidden = false;
     el.filename.textContent = data.name;
     buildPages();
+    buildThumbs();
+    checkScan();
     toast(`${data.pages.length} page(s) chargée(s)`);
   } catch (err) {
     toast(err.message, true);
@@ -656,6 +669,8 @@ async function pageOperation(label, request) {
     applyState(data);
     resetSearch();
     buildPages();
+    buildThumbs();
+    checkScan();
     return data;
   } catch (err) {
     toast(err.message, true);
@@ -997,7 +1012,7 @@ function toggleFind(force) {
   el.findPanel.hidden = !show;
   $('#btn-find').classList.toggle('active', show);
   // Les panneaux sont collés au même endroit sous la barre : un seul à la fois.
-  if (show) { togglePages(false); toggleAssist(false); }
+  if (show) { togglePages(false); toggleAssist(false); toggleForm(false); }
   if (show) el.findSearch.focus();
 }
 
@@ -1005,7 +1020,7 @@ function togglePages(force) {
   const show = force !== undefined ? force : el.pagesPanel.hidden;
   el.pagesPanel.hidden = !show;
   $('#btn-pages').classList.toggle('active', show);
-  if (show) { toggleFind(false); toggleAssist(false); }
+  if (show) { toggleFind(false); toggleAssist(false); toggleForm(false); }
   if (show) el.extractSpec.focus();
 }
 
@@ -1162,7 +1177,7 @@ function toggleAssist(force) {
   const show = force !== undefined ? force : assist.panel.hidden;
   assist.panel.hidden = !show;
   $('#btn-assist').classList.toggle('active', show);
-  if (show) { toggleFind(false); togglePages(false); assist.instruction.focus(); }
+  if (show) { toggleFind(false); togglePages(false); toggleForm(false); assist.instruction.focus(); }
 }
 
 /** Page la plus proche du centre de la fenêtre : c'est celle que l'utilisateur regarde. */
@@ -1290,6 +1305,306 @@ assist.apply.addEventListener('click', async () => {
     busy(false);
   }
 });
+
+/* ------------------------------------------------------ PDF scannés (sans texte) */
+
+$('#notice-close').addEventListener('click', () => { el.notice.hidden = true; });
+
+/** Un scan n'a pas de texte : l'app n'a rien à y corriger, autant le dire. */
+async function checkScan() {
+  if (!state.docId) return;
+  try {
+    const data = await api(`/api/${state.docId}/scan`);
+    state.scanPages = data.scan_pages || [];
+    el.viewer.querySelectorAll('.page').forEach((node) => {
+      node.classList.toggle('scanned', state.scanPages.includes(+node.dataset.page));
+    });
+    if (!state.scanPages.length) { el.notice.hidden = true; return; }
+    el.noticeText.textContent = data.fully_scanned
+      ? 'Ce PDF est un scan : ses pages sont des images, il n’y a aucun texte à corriger. '
+        + 'Vous pouvez tout de même surligner, caviarder, ajouter du texte, signer ou gérer les pages.'
+      : `${state.scanPages.length} page(s) sur ${data.page_count} sont des images sans texte : `
+        + 'le clic sur le texte n’y fonctionnera pas.';
+    el.notice.hidden = false;
+  } catch (_) { /* route absente sur un serveur plus ancien : sans conséquence */ }
+}
+
+/* --------------------------------------------------------------- vignettes */
+
+/** Colonne de miniatures du menu latéral : navigation et réordonnancement. */
+function buildThumbs() {
+  el.thumbs.innerHTML = '';
+  if (!state.docId) { el.thumbsBox.hidden = true; return; }
+  el.thumbsBox.hidden = false;
+
+  state.pages.forEach((page) => {
+    const thumb = document.createElement('div');
+    thumb.className = 'thumb';
+    thumb.draggable = true;
+    thumb.dataset.page = page.number;
+    thumb.title = `Page ${page.number + 1}`;
+
+    const img = document.createElement('img');
+    img.src = `/api/${state.docId}/page/${page.number}.png?scale=0.2&v=${state.version}`;
+    img.alt = '';
+    img.draggable = false;
+    const label = document.createElement('span');
+    label.textContent = page.number + 1;
+    thumb.append(img, label);
+
+    thumb.addEventListener('click', () => {
+      const node = pageNode(page.number);
+      if (node) node.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setMenu(false);
+    });
+
+    thumb.addEventListener('dragstart', (e) => {
+      dragFrom = page.number;
+      thumb.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      // Firefox n'amorce pas le glissement sans données attachées.
+      e.dataTransfer.setData('text/plain', String(page.number));
+    });
+    thumb.addEventListener('dragend', clearDropMarks);
+    thumb.addEventListener('dragover', (e) => {
+      if (dragFrom === null || dragFrom === page.number) return;
+      e.preventDefault();
+      const box = thumb.getBoundingClientRect();
+      const after = e.clientX > box.left + box.width / 2;
+      clearDropMarks(false);
+      thumb.classList.add(after ? 'drop-after' : 'drop-before');
+    });
+    thumb.addEventListener('drop', (e) => {
+      e.preventDefault();
+      if (dragFrom === null || dragFrom === page.number) return clearDropMarks();
+      const box = thumb.getBoundingClientRect();
+      const after = e.clientX > box.left + box.width / 2;
+      const from = dragFrom;
+      clearDropMarks();
+      // Position d'insertion dans la liste, puis correction du décalage provoqué
+      // par le retrait de la page déplacée quand elle vient d'avant la cible.
+      const slot = page.number + (after ? 1 : 0);
+      dropPage(from, from < slot ? slot - 1 : slot);
+    });
+
+    el.thumbs.appendChild(thumb);
+  });
+}
+
+let dragFrom = null;
+
+function clearDropMarks(reset = true) {
+  el.thumbs.querySelectorAll('.thumb').forEach((n) =>
+    n.classList.remove('drop-before', 'drop-after'));
+  if (reset) {
+    el.thumbs.querySelectorAll('.dragging').forEach((n) => n.classList.remove('dragging'));
+    dragFrom = null;
+  }
+}
+
+async function dropPage(from, to) {
+  if (from === to) return;
+  const data = await pageOperation('Déplacement…', () =>
+    postJSON(`/api/${state.docId}/page/${from}/move`, { to }));
+  if (data) toast(`Page déplacée en position ${data.page + 1}`);
+}
+
+/* --------------------------------------------------------- formulaires PDF */
+
+$('#btn-form').addEventListener('click', () => toggleForm());
+
+function toggleForm(force) {
+  const show = force !== undefined ? force : el.formPanel.hidden;
+  el.formPanel.hidden = !show;
+  $('#btn-form').classList.toggle('active', show);
+  if (!show) return;
+  toggleFind(false);
+  togglePages(false);
+  toggleAssist(false);
+  loadFields();
+}
+
+async function loadFields() {
+  el.formFields.innerHTML = '';
+  el.formApply.disabled = true;
+  el.formInfo.textContent = 'Lecture des champs…';
+  try {
+    const data = await api(`/api/${state.docId}/fields`);
+    const fields = data.fields || [];
+    if (!fields.length) {
+      el.formInfo.textContent = 'Ce PDF ne contient aucun champ de formulaire.';
+      return;
+    }
+    el.formInfo.textContent = `${fields.length} champ(s)`;
+    fields.forEach((f) => el.formFields.appendChild(fieldRow(f)));
+    el.formApply.disabled = false;
+  } catch (err) {
+    el.formInfo.textContent = err.message;
+  }
+}
+
+const CHECKED = (v) => !['', 'off', 'false', '0', 'none'].includes(String(v).toLowerCase());
+
+function fieldRow(field) {
+  const row = document.createElement('label');
+  row.className = 'form-field';
+  const head = document.createElement('span');
+  head.innerHTML = '<b></b><i class="fpage"></i>';
+  head.querySelector('b').textContent = field.name;
+  head.querySelector('.fpage').textContent =
+    'p. ' + field.pages.map((p) => p + 1).join(', ');
+
+  let input;
+  if (field.kind === 'checkbox') {
+    row.classList.add('bool');
+    input = document.createElement('input');
+    input.type = 'checkbox';
+    input.checked = CHECKED(field.value);
+    // Une case cochée s'écrit avec le nom de son état, que le PDF a choisi.
+    row.dataset.on = field.options[0] || '1';
+  } else if (field.kind === 'choice' || field.kind === 'radio') {
+    input = document.createElement('select');
+    const options = field.kind === 'radio' ? ['Off', ...field.options] : field.options;
+    if (field.value && !options.includes(field.value)) options.unshift(field.value);
+    options.forEach((value) => {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = value === 'Off' ? '— non coché —' : value;
+      input.appendChild(option);
+    });
+    input.value = field.value || (field.kind === 'radio' ? 'Off' : options[0] || '');
+  } else {
+    input = document.createElement('input');
+    input.type = 'text';
+    input.value = field.value || '';
+    if (field.max_len) input.maxLength = field.max_len;
+  }
+  input.dataset.field = field.name;
+  input.dataset.kind = field.kind;
+
+  row.append(field.kind === 'checkbox' ? input : head, field.kind === 'checkbox' ? head : input);
+  return row;
+}
+
+el.formApply.addEventListener('click', async () => {
+  const values = {};
+  el.formFields.querySelectorAll('[data-field]').forEach((input) => {
+    if (input.dataset.kind === 'checkbox') {
+      values[input.dataset.field] = input.checked
+        ? (input.closest('.form-field').dataset.on || '1')
+        : 'Off';
+    } else {
+      values[input.dataset.field] = input.value;
+    }
+  });
+  busy(true, 'Écriture du formulaire…');
+  try {
+    const data = await postJSON(`/api/${state.docId}/fields`, { values });
+    applyState(data);
+    refreshAll();
+    toast(`${data.filled} champ(s) renseigné(s)`);
+  } catch (err) {
+    toast(err.message, true);
+  } finally {
+    busy(false);
+  }
+});
+
+/* ---------------------------------------------------- signature manuscrite */
+
+$('#btn-sign').addEventListener('click', openSignature);
+
+const sign = { drawing: false, dirty: false, ctx: null, last: null };
+
+function openSignature() {
+  el.signModal.hidden = false;
+  sign.ctx = el.signCanvas.getContext('2d');
+  clearSignature();
+}
+
+function clearSignature() {
+  sign.ctx.clearRect(0, 0, el.signCanvas.width, el.signCanvas.height);
+  sign.dirty = false;
+  $('#sign-ok').disabled = true;
+}
+
+/** Le canvas est affiché plus petit que sa résolution : on ramène donc les
+    coordonnées de l'événement dans son espace propre. */
+function signPoint(e) {
+  const box = el.signCanvas.getBoundingClientRect();
+  return {
+    x: (e.clientX - box.left) * (el.signCanvas.width / box.width),
+    y: (e.clientY - box.top) * (el.signCanvas.height / box.height),
+  };
+}
+
+el.signCanvas.addEventListener('pointerdown', (e) => {
+  el.signCanvas.setPointerCapture(e.pointerId);
+  sign.drawing = true;
+  sign.last = signPoint(e);
+});
+el.signCanvas.addEventListener('pointermove', (e) => {
+  if (!sign.drawing) return;
+  const point = signPoint(e);
+  const ctx = sign.ctx;
+  ctx.strokeStyle = $('#sign-color').value;
+  ctx.lineWidth = +$('#sign-width').value * 1.6;
+  ctx.lineCap = ctx.lineJoin = 'round';
+  ctx.beginPath();
+  ctx.moveTo(sign.last.x, sign.last.y);
+  ctx.lineTo(point.x, point.y);
+  ctx.stroke();
+  sign.last = point;
+  sign.dirty = true;
+  $('#sign-ok').disabled = false;
+});
+['pointerup', 'pointercancel', 'pointerleave'].forEach((ev) =>
+  el.signCanvas.addEventListener(ev, () => { sign.drawing = false; }));
+
+$('#sign-clear').addEventListener('click', clearSignature);
+$('#sign-cancel').addEventListener('click', () => { el.signModal.hidden = true; });
+
+$('#sign-ok').addEventListener('click', () => {
+  const trimmed = trimSignature();
+  if (!trimmed) return toast('Rien n’a été dessiné.', true);
+  el.signModal.hidden = true;
+  trimmed.toBlob((blob) => {
+    clearPendingImage();
+    const file = new File([blob], 'signature.png', { type: 'image/png' });
+    const url = URL.createObjectURL(blob);
+    // Une signature se pose petite : 150 pt de large, soit ~5 cm.
+    state.pendingImage = { file, url, ratio: trimmed.width / trimmed.height, width: 150 };
+    setMode('placing');
+  }, 'image/png');
+});
+
+/** Rogne le canvas à l'encadrement du tracé : sans cela la signature serait
+    noyée dans un rectangle largement vide, impossible à placer correctement. */
+function trimSignature() {
+  const { width: w, height: h } = el.signCanvas;
+  const pixels = sign.ctx.getImageData(0, 0, w, h).data;
+  let x0 = w, y0 = h, x1 = -1, y1 = -1;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (pixels[(y * w + x) * 4 + 3] < 8) continue;
+      if (x < x0) x0 = x;
+      if (x > x1) x1 = x;
+      if (y < y0) y0 = y;
+      if (y > y1) y1 = y;
+    }
+  }
+  if (x1 < 0) return null;
+  const pad = 10;
+  x0 = Math.max(0, x0 - pad); y0 = Math.max(0, y0 - pad);
+  x1 = Math.min(w - 1, x1 + pad); y1 = Math.min(h - 1, y1 + pad);
+
+  const out = document.createElement('canvas');
+  out.width = x1 - x0 + 1;
+  out.height = y1 - y0 + 1;
+  out.getContext('2d').drawImage(el.signCanvas, x0, y0, out.width, out.height,
+    0, 0, out.width, out.height);
+  return out;
+}
 
 /* ------------------------------------------------------------------- loupe */
 
@@ -1438,10 +1753,15 @@ $('#btn-close').addEventListener('click', async () => {
   el.docActions.hidden = true;
   el.sideActions.hidden = true;
   el.dock.hidden = true;
+  el.notice.hidden = true;
+  el.thumbsBox.hidden = true;
+  el.thumbs.innerHTML = '';
+  state.scanPages = [];
   setMenu(false);
   toggleFind(false);
   togglePages(false);
   toggleAssist(false);
+  toggleForm(false);
   setMode(null);
   setLens(false);
   resetSearch();
@@ -1453,6 +1773,7 @@ $('#btn-close').addEventListener('click', async () => {
 document.addEventListener('keydown', (e) => {
   // Échap quitte le mode en cours ; l'édition d'un fragment gère sa propre
   // touche Échap, on ne lui marche donc pas dessus.
+  if (e.key === 'Escape' && !el.signModal.hidden) { el.signModal.hidden = true; return; }
   if (e.key === 'Escape' && menuOpen()) { setMenu(false); return; }
   const inMode = state.adding || state.highlighting || state.redacting || state.placing;
   if (e.key === 'Escape' && !state.editing && (inMode || state.lens)) {

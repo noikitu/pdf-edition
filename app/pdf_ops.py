@@ -172,6 +172,16 @@ def extract_items(doc: fitz.Document, pno: int) -> list[TextItem]:
     return items
 
 
+def pages_without_text(doc: fitz.Document) -> list[int]:
+    """Pages ne contenant aucun texte extractible — typiquement des scans.
+
+    Sur ces pages l'application n'a rien à proposer : le texte n'existe pas dans
+    le PDF, ce sont des pixels. Autant le dire clairement plutôt que de laisser
+    l'utilisateur cliquer sans effet.
+    """
+    return [pno for pno, page in enumerate(doc) if not page.get_text("text").strip()]
+
+
 def page_info(doc: fitz.Document) -> list[dict]:
     return [
         {"number": i, "width": round(p.rect.width, 2), "height": round(p.rect.height, 2)}
@@ -651,6 +661,18 @@ def move_page(doc: fitz.Document, pno: int, offset: int) -> int:
     return target
 
 
+def move_page_to(doc: fitz.Document, pno: int, target: int) -> int:
+    """Déplace une page à une position quelconque (glisser-déposer des vignettes).
+
+    `move_page` insère *avant* la position indiquée. Descendre une page décale
+    donc la cible d'un cran, la place libérée par le retrait comptant elle aussi.
+    """
+    if not 0 <= target < doc.page_count or target == pno:
+        return pno
+    doc.move_page(pno, target if target < pno else target + 1)
+    return target
+
+
 def extract_pages(doc: fitz.Document, numbers: list[int]) -> bytes:
     """Construit un nouveau PDF ne contenant que les pages demandées, dans l'ordre."""
     out = fitz.open()
@@ -681,6 +703,103 @@ def parse_page_spec(spec: str, page_count: int) -> list[int]:
             if index not in numbers:
                 numbers.append(index)
     return numbers
+
+
+# --------------------------------------------------------------------------
+# Formulaires
+# --------------------------------------------------------------------------
+
+# Types de champs que l'interface sait présenter.
+_WIDGET_KINDS = {
+    fitz.PDF_WIDGET_TYPE_TEXT: "text",
+    fitz.PDF_WIDGET_TYPE_CHECKBOX: "checkbox",
+    fitz.PDF_WIDGET_TYPE_RADIOBUTTON: "radio",
+    fitz.PDF_WIDGET_TYPE_COMBOBOX: "choice",
+    fitz.PDF_WIDGET_TYPE_LISTBOX: "choice",
+}
+
+
+def _on_states(widget) -> list[str]:
+    """États « coché » d'une case ou d'un bouton radio, hors « Off »."""
+    try:
+        states = widget.button_states() or {}
+    except Exception:
+        return []
+    found: list[str] = []
+    for group in states.values():
+        for state in group or []:
+            if state and state != "Off" and state not in found:
+                found.append(state)
+    return found
+
+
+def list_fields(doc: fitz.Document) -> list[dict]:
+    """Champs de formulaire du document, regroupés par nom.
+
+    Un même nom peut porter plusieurs widgets — c'est le cas d'un groupe de
+    boutons radio, et d'un champ répété sur plusieurs pages. On les présente donc
+    une seule fois, en mémorisant les pages concernées.
+    """
+    fields: dict[str, dict] = {}
+    for pno in range(doc.page_count):
+        for widget in doc[pno].widgets():
+            kind = _WIDGET_KINDS.get(widget.field_type)
+            if kind is None:      # bouton d'action, signature… rien à saisir
+                continue
+            name = widget.field_name or ""
+            if not name:
+                continue
+            entry = fields.get(name)
+            if entry is None:
+                value = widget.field_value
+                entry = {
+                    "name": name,
+                    "kind": kind,
+                    "value": "" if value is None else str(value),
+                    "options": list(widget.choice_values or []) if kind == "choice" else [],
+                    "max_len": int(widget.text_maxlen or 0),
+                    "pages": [],
+                }
+                fields[name] = entry
+            # Pour un groupe de radios, la valeur utile est celle du bouton coché.
+            if kind == "radio" and widget.field_value not in (None, "", "Off"):
+                entry["value"] = str(widget.field_value)
+            # Cases et radios n'exposent pas leurs choix dans `choice_values` mais
+            # dans leurs états : c'est le nom de l'état « coché » qu'il faudra
+            # écrire pour sélectionner ce bouton précis.
+            if kind in ("checkbox", "radio"):
+                for state in _on_states(widget):
+                    if state not in entry["options"]:
+                        entry["options"].append(state)
+            if pno not in entry["pages"]:
+                entry["pages"].append(pno)
+    return list(fields.values())
+
+
+def fill_fields(doc: fitz.Document, values: dict[str, str]) -> int:
+    """Renseigne les champs nommés. Renvoie le nombre de widgets mis à jour."""
+    filled = 0
+    for pno in range(doc.page_count):
+        for widget in doc[pno].widgets():
+            name = widget.field_name or ""
+            if name not in values:
+                continue
+            raw = values[name]
+            kind = _WIDGET_KINDS.get(widget.field_type)
+            if kind == "checkbox":
+                widget.field_value = str(raw).lower() in ("1", "true", "on", "oui")
+            elif kind == "radio":
+                # Un radio ne se cocher qu'en lui donnant son propre nom d'état ;
+                # les autres boutons du groupe se décochent d'eux-mêmes.
+                widget.field_value = str(raw)
+            else:
+                widget.field_value = str(raw)
+            try:
+                widget.update()
+            except Exception:
+                continue      # widget récalcitrant : on passe au suivant
+            filled += 1
+    return filled
 
 
 def merge_pdf(doc: fitz.Document, data: bytes) -> int:

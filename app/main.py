@@ -88,7 +88,12 @@ class RotatePayload(BaseModel):
 
 
 class MovePayload(BaseModel):
-    offset: int = -1   # -1 monte la page, +1 la descend
+    offset: int = -1              # -1 monte la page, +1 la descend
+    to: Optional[int] = None      # position absolue (glisser-déposer des vignettes)
+
+
+class FieldsPayload(BaseModel):
+    values: dict[str, str] = Field(default_factory=dict)
 
 
 class AssistPayload(BaseModel):
@@ -150,12 +155,52 @@ def state(doc_id: str) -> dict:
     return {"doc_id": doc_id, "name": session.name, **_state(session)}
 
 
+@app.get("/api/{doc_id}/scan")
+def scan_report(doc_id: str) -> dict:
+    """Pages dépourvues de texte extractible (scans).
+
+    Volontairement hors de l'état renvoyé par les autres routes : le calcul relit
+    tout le document, ce serait gâché à chaque modification. Le client l'appelle
+    à l'ouverture et après les opérations qui changent la pagination.
+    """
+    session = _session(doc_id)
+    pages = pdf_ops.pages_without_text(session.doc)
+    return {
+        "scan_pages": pages,
+        "page_count": session.doc.page_count,
+        "fully_scanned": len(pages) == session.doc.page_count,
+    }
+
+
+@app.get("/api/{doc_id}/fields")
+def fields(doc_id: str) -> dict:
+    session = _session(doc_id)
+    return {"fields": pdf_ops.list_fields(session.doc)}
+
+
+@app.post("/api/{doc_id}/fields")
+def fill(doc_id: str, payload: FieldsPayload) -> dict:
+    session = _session(doc_id)
+    if not payload.values:
+        raise HTTPException(400, "Aucune valeur à écrire.")
+    session.snapshot()
+    filled = pdf_ops.fill_fields(session.doc, payload.values)
+    if filled:
+        session.version += 1
+    else:
+        session.undo_stack.pop()
+    return {"filled": filled, **_state(session)}
+
+
 @app.get("/api/{doc_id}/page/{pno}.png")
 def page_image(doc_id: str, pno: int, scale: float = 2.0, v: int = 0) -> Response:
     session = _session(doc_id)
     if not 0 <= pno < session.doc.page_count:
         raise HTTPException(404, "Page inexistante.")
-    scale = min(max(scale, 0.5), 4.0)
+    # Le plancher descend à 0,1 pour les vignettes du menu latéral : à 0,5 le
+    # serveur rendrait des images cinq fois trop grandes pour la place qu'elles
+    # occupent, sur toutes les pages du document.
+    scale = min(max(scale, 0.1), 4.0)
     png = pdf_ops.render_page(session.doc, pno, scale)
     # L'URL porte le numéro de version du document : le contenu d'une adresse
     # donnée ne change donc jamais, et on peut laisser le navigateur la garder.
@@ -421,7 +466,10 @@ def reorder_page(doc_id: str, pno: int, payload: MovePayload) -> dict:
     if not 0 <= pno < session.doc.page_count:
         raise HTTPException(404, "Page inexistante.")
     session.snapshot()
-    position = pdf_ops.move_page(session.doc, pno, payload.offset)
+    if payload.to is None:
+        position = pdf_ops.move_page(session.doc, pno, payload.offset)
+    else:
+        position = pdf_ops.move_page_to(session.doc, pno, payload.to)
     if position != pno:
         session.version += 1
     else:

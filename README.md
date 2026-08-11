@@ -65,6 +65,9 @@ répartiteur avec des sessions collantes, pas plusieurs workers.
 | Corriger partout | « Remplacer » → mot fautif, mot correct, « Tout remplacer » |
 | Ajouter un texte | « Texte », cliquer à l'endroit voulu, saisir, « Ajouter » |
 | Insérer une image ou une signature | « Image », choisir le fichier, cliquer sur la page, ajuster le cadre, « Insérer » |
+| Signer à la main | ✒️ dans la barre, signer à la souris ou au doigt, « Placer sur la page » |
+| Naviguer et réordonner | vignettes dans le menu latéral : clic pour aller à la page, glisser pour déplacer |
+| Remplir un formulaire | menu → « Formulaire », saisir les champs, « Renseigner le formulaire » |
 | Effacer ou noircir une zone | « Caviarder », tracer un rectangle, puis « Effacer » ou « Noircir » |
 | Surligner | « Surligner », puis cliquer un texte |
 | Regarder de près | 🔍 active la loupe ; la molette règle le grossissement (1,5× à 6×) |
@@ -74,6 +77,12 @@ répartiteur avec des sessions collantes, pas plusieurs workers.
 | Alléger le fichier | « Compresser » |
 | Annuler / rétablir | `Ctrl+Z` / `Ctrl+Maj+Z` |
 | Récupérer le résultat | « Télécharger » (`Ctrl+S`) |
+
+**Les PDF scannés sont signalés.** Un scan ne contient pas de texte mais des images :
+il n'y a alors rien à corriger, et cliquer sur la page ne peut rien faire. L'app le
+détecte à l'ouverture, l'annonce dans un bandeau et marque les pages concernées, au lieu
+de laisser chercher pourquoi rien ne se passe. Le reste demeure utilisable : surligner,
+caviarder, ajouter du texte, signer, gérer les pages.
 
 « Caviarder » retire réellement le contenu du PDF — texte supprimé, pixels des images
 effacés dans la zone — et non un simple rectangle posé par-dessus, que n'importe quel

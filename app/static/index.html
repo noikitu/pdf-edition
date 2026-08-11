@@ -26,6 +26,7 @@
       🖼
       <input id="image-input" type="file" accept="image/png,image/jpeg,image/gif,image/bmp,image/tiff,.png,.jpg,.jpeg" hidden>
     </label>
+    <button id="btn-sign" class="icon" title="Dessiner une signature">✒️</button>
     <button id="btn-redact" class="icon" title="Effacer ou noircir une zone"><span class="ic-rect"></span></button>
   </div>
 
@@ -53,6 +54,7 @@
   <nav id="sidebar-actions" class="side-nav" hidden>
     <button id="btn-find">Rechercher et remplacer</button>
     <button id="btn-pages">Pages</button>
+    <button id="btn-form">Formulaire</button>
     <label id="btn-merge">
       Fusionner un PDF
       <input id="merge-input" type="file" accept="application/pdf,.pdf" hidden>
@@ -61,6 +63,12 @@
     <span class="side-gap"></span>
     <button id="btn-download" class="primary">↓ Télécharger</button>
   </nav>
+
+  <!-- Vignettes : navigation, et glisser-déposer pour réordonner. -->
+  <div id="thumbs-box" class="thumbs-box" hidden>
+    <span class="side-label">Pages — glissez pour réordonner</span>
+    <div id="thumbs" class="thumbs"></div>
+  </div>
 
   <p class="side-empty">Ouvrez un PDF pour accéder aux outils.</p>
 </aside>
@@ -77,6 +85,21 @@
   </span>
   <button id="btn-replace-all" class="primary">Tout remplacer</button>
   <span id="find-info"></span>
+</div>
+
+<!-- Bandeau d'avertissement : PDF scanné, donc sans texte à corriger. -->
+<div id="notice" class="notice" hidden>
+  <span id="notice-text"></span>
+  <button id="notice-close" class="icon" title="Masquer">✕</button>
+</div>
+
+<div id="form-panel" class="panel form" hidden>
+  <div class="form-head">
+    <span id="form-info">Chargement des champs…</span>
+    <span class="grow"></span>
+    <button id="btn-form-apply" class="primary" disabled>Renseigner le formulaire</button>
+  </div>
+  <div id="form-fields" class="form-fields"></div>
 </div>
 
 <div id="pages-panel" class="panel" hidden>
@@ -163,6 +186,24 @@
   <button id="btn-zoom-in" class="icon" title="Zoomer">+</button>
   <span class="sep"></span>
   <button id="btn-lens" class="icon" title="Loupe : grossit sous le curseur (molette pour régler)">🔍</button>
+</div>
+
+<!-- Signature manuscrite : le tracé est rogné à son encadrement puis envoyé
+     comme n'importe quelle image, par la route d'insertion existante. -->
+<div id="sign-modal" class="modal" hidden>
+  <div class="modal-card">
+    <h2>Signez ci-dessous</h2>
+    <p>À la souris, au trackpad ou au doigt. Le fond reste transparent.</p>
+    <canvas id="sign-canvas" width="760" height="260"></canvas>
+    <div class="modal-row">
+      <label class="ink">Couleur <input id="sign-color" type="color" value="#1a2b6b"></label>
+      <label class="ink">Épaisseur <input id="sign-width" type="range" min="1" max="8" step="1" value="3"></label>
+      <span class="grow"></span>
+      <button id="sign-clear">Effacer</button>
+      <button id="sign-cancel">Annuler</button>
+      <button id="sign-ok" class="primary" disabled>Placer sur la page</button>
+    </div>
+  </div>
 </div>
 
 <div id="overlay" class="overlay" hidden>

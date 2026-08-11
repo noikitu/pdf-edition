@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import fonts, pdf_ops
+from . import fonts, llm, pdf_ops
 from .config import MAX_UPLOAD_MB
 from .store import Session, store
 
@@ -89,6 +89,16 @@ class RotatePayload(BaseModel):
 
 class MovePayload(BaseModel):
     offset: int = -1   # -1 monte la page, +1 la descend
+
+
+class AssistPayload(BaseModel):
+    instruction: str
+    provider: str
+    # La clé n'est ni journalisée, ni stockée, ni renvoyée : elle ne sert qu'à
+    # l'appel sortant de cette requête.
+    api_key: str
+    model: str = ""
+    page: Optional[int] = None   # None = tout le document
 
 
 class RedactPayload(BaseModel):
@@ -214,6 +224,51 @@ def textbox(doc_id: str, payload: TextBoxPayload) -> dict:
     )
     session.version += 1
     return {"changed": 1, **_state(session)}
+
+
+@app.get("/api/llm/providers")
+def llm_providers() -> dict:
+    """Fournisseurs proposés, avec ceux dont le paquet est réellement installé."""
+    return {"providers": llm.catalogue()}
+
+
+@app.post("/api/{doc_id}/assist")
+def assist(doc_id: str, payload: AssistPayload) -> dict:
+    """Demande des corrections au LLM. N'applique rien : l'utilisateur valide.
+
+    Le PDF n'est pas transmis au fournisseur, seulement le texte des fragments.
+    """
+    session = _session(doc_id)
+    if not payload.instruction.strip():
+        raise HTTPException(400, "Indiquez ce que le modèle doit corriger.")
+    if not payload.api_key.strip():
+        raise HTTPException(400, "Clé API manquante.")
+
+    if payload.page is None:
+        pages = list(range(session.doc.page_count))
+    elif 0 <= payload.page < session.doc.page_count:
+        pages = [payload.page]
+    else:
+        raise HTTPException(404, "Page inexistante.")
+
+    try:
+        result = llm.suggest(
+            session.doc,
+            pages,
+            payload.instruction.strip(),
+            payload.provider,
+            payload.api_key.strip(),
+            payload.model.strip(),
+        )
+    except ValueError as exc:            # fournisseur inconnu
+        raise HTTPException(400, str(exc)) from exc
+    except RuntimeError as exc:          # paquet manquant
+        raise HTTPException(503, str(exc)) from exc
+    except Exception as exc:             # clé refusée, quota, modèle inconnu, réseau…
+        # On renvoie le message du fournisseur : « invalid api key », « model not
+        # found »… c'est presque toujours l'information utile.
+        raise HTTPException(502, f"Le fournisseur a refusé la demande : {exc}") from exc
+    return result
 
 
 @app.post("/api/{doc_id}/image")

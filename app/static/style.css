@@ -160,7 +160,7 @@ button:hover:not(:disabled) { background: rgba(255, 255, 255, .8); }
 button:disabled { color: #b7b7aa; opacity: .6; cursor: default; }
 
 /* boutons portant un libellé plutôt qu'un pictogramme */
-#btn-add, #btn-find, #btn-compress, #btn-count, #btn-redact, .newbox .cancel {
+#btn-add, #btn-find, #btn-compress, #btn-count, #btn-redact, #btn-assist, .newbox .cancel {
   font-weight: 500;
   font-size: 13px;
   padding: 9px 13px;
@@ -240,6 +240,82 @@ button.active {
   min-width: 54px;
   text-align: center;
 }
+
+/* ----------------------------------------------------- panneau assistant */
+
+/* Contrairement aux autres, ce panneau empile plusieurs rangées et une liste de
+   propositions : il passe donc en colonne et devient défilable. */
+.panel.assist { flex-direction: column; align-items: stretch; gap: 10px; max-height: 72vh; overflow: auto; }
+.assist-row { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+.assist-row .grow { flex: 1; min-width: 260px; }
+.panel.assist select {
+  font: 400 13px/1 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  color: var(--ink);
+  padding: 9px 10px;
+  border: 1px solid rgba(255, 255, 255, .9);
+  border-radius: var(--r-btn);
+  background: rgba(255, 255, 255, .75);
+  cursor: pointer;
+}
+.panel.assist input[type=password] {
+  font: 400 13px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  padding: 9px 11px;
+  border: 1px solid rgba(255, 255, 255, .9);
+  border-radius: var(--r-btn);
+  min-width: 260px;
+  color: var(--ink);
+  background: rgba(255, 255, 255, .75);
+}
+.panel.assist input:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(255, 233, 0, .5);
+  background: #fff;
+}
+#assist-info { font-size: 13px; color: var(--muted); padding-bottom: 9px; }
+
+.assist-warning {
+  margin: 0;
+  font: 400 12px/1.5 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  color: var(--muted);
+  background: rgba(255, 255, 190, .45);
+  border: 1px solid rgba(255, 255, 255, .8);
+  border-radius: 10px;
+  padding: 8px 11px;
+}
+.assist-warning kbd {
+  font: 500 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: rgba(255, 255, 255, .9);
+  border: 1px solid var(--hairline);
+  border-radius: 5px;
+  padding: 2px 5px;
+}
+
+.assist-results { display: flex; flex-direction: column; gap: 8px; }
+.assist-actions { display: flex; align-items: center; gap: 8px; }
+.assist-actions .grow { flex: 1; }
+.assist-actions button { font-size: 12px; padding: 8px 11px; }
+#assist-count { font-size: 12px; color: var(--muted); }
+
+#assist-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+#assist-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 11px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .6);
+  border: 1px solid rgba(255, 255, 255, .85);
+}
+#assist-list .texts { flex: 1; display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+#assist-list .page-ref {
+  font: 400 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--muted-soft);
+}
+#assist-list del { color: #a3231a; text-decoration-thickness: 1px; }
+#assist-list ins { color: var(--green); text-decoration: none; }
+#assist-list .why { font-size: 12px; color: var(--muted-soft); font-style: normal; }
+#assist-list .goto { padding: 5px 8px; font-size: 12px; }
+#assist-list .pick { padding-top: 2px; }
 
 /* le bouton Fusionner est un <label> : il doit imiter les vrais boutons */
 .merge-btn {

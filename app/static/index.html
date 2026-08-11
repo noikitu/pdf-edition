@@ -35,6 +35,7 @@
     <button id="btn-redact" title="Effacer ou noircir une zone">▮ Caviarder</button>
     <button id="btn-find" title="Rechercher et remplacer (Ctrl+F)">Remplacer</button>
     <button id="btn-pages" title="Extraire des pages">⌸ Pages</button>
+    <button id="btn-assist" title="Faire relire le texte par un LLM">✨ Assistant</button>
     <button id="btn-compress" title="Réduire le poids du PDF">🍋 Compresser</button>
     <label class="merge-btn" id="btn-merge" title="Ajouter les pages d'un autre PDF">
       ⧉ Fusionner
@@ -72,6 +73,53 @@
   <label>Extraire les pages <input id="extract-spec" type="text" placeholder="ex. 1-3, 5, 8-"></label>
   <button id="btn-extract" class="primary">Extraire en PDF</button>
   <span id="pages-info"></span>
+</div>
+
+<div id="assist-panel" class="panel assist" hidden>
+  <div class="assist-row">
+    <label>Fournisseur
+      <select id="assist-provider"></select>
+    </label>
+    <label>Modèle
+      <input id="assist-model" type="text" placeholder="modèle par défaut">
+    </label>
+    <label>Clé API
+      <input id="assist-key" type="password" placeholder="collée ici, jamais enregistrée sur le serveur"
+             autocomplete="off" spellcheck="false">
+    </label>
+    <label>Portée
+      <select id="assist-scope">
+        <option value="page">Page affichée</option>
+        <option value="document">Tout le document</option>
+      </select>
+    </label>
+  </div>
+
+  <div class="assist-row">
+    <label class="grow">Consigne
+      <input id="assist-instruction" type="text"
+             value="Corrige les fautes d’orthographe, de grammaire et de typographie."
+             placeholder="ex. corrige les fautes, sans reformuler">
+    </label>
+    <button id="btn-assist-run" class="primary">Analyser</button>
+    <span id="assist-info"></span>
+  </div>
+
+  <p class="assist-warning">
+    Le PDF n’est pas envoyé au fournisseur, mais le <strong>texte</strong> des pages analysées l’est.
+    Rien n’est modifié sans votre validation, et <kbd>Ctrl+Z</kbd> annule ce qui a été appliqué.
+  </p>
+
+  <div id="assist-results" class="assist-results" hidden>
+    <div class="assist-actions">
+      <button id="btn-assist-all">Tout cocher</button>
+      <button id="btn-assist-none">Tout décocher</button>
+      <span class="grow"></span>
+      <span id="assist-count"></span>
+      <button id="btn-assist-apply" class="primary">Appliquer la sélection</button>
+    </div>
+    <ul id="assist-list"></ul>
+  </div>
 </div>
 
 <main id="main">

@@ -1,0 +1,6 @@
+# Assistance par LLM (facultative). L'application démarre et fonctionne sans.
+# N'installez que le fournisseur qui vous intéresse : chacun est indépendant.
+langchain-core>=0.3
+langchain-anthropic>=0.3
+langchain-openai>=0.3
+langchain-google-genai>=2.0

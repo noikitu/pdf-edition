@@ -926,8 +926,8 @@ function toggleFind(force) {
   const show = force !== undefined ? force : el.findPanel.hidden;
   el.findPanel.hidden = !show;
   $('#btn-find').classList.toggle('active', show);
-  // Les deux panneaux sont collés au même endroit sous la barre : un seul à la fois.
-  if (show) togglePages(false);
+  // Les panneaux sont collés au même endroit sous la barre : un seul à la fois.
+  if (show) { togglePages(false); toggleAssist(false); }
   if (show) el.findSearch.focus();
 }
 
@@ -935,7 +935,7 @@ function togglePages(force) {
   const show = force !== undefined ? force : el.pagesPanel.hidden;
   el.pagesPanel.hidden = !show;
   $('#btn-pages').classList.toggle('active', show);
-  if (show) toggleFind(false);
+  if (show) { toggleFind(false); toggleAssist(false); }
   if (show) el.extractSpec.focus();
 }
 
@@ -1021,6 +1021,199 @@ $('#btn-replace-all').addEventListener('click', async () => {
     const approx = data.approximated ? `, dont ${data.approximated} en police approchée` : '';
     el.findInfo.textContent = `${data.changed} fragment(s) modifié(s)${approx}`;
     toast(data.changed ? `${data.changed} fragment(s) modifié(s)${approx}` : 'Aucune occurrence trouvée');
+  } catch (err) {
+    toast(err.message, true);
+  } finally {
+    busy(false);
+  }
+});
+
+/* --------------------------------------------------------- assistant LLM */
+
+const assist = {
+  provider: $('#assist-provider'),
+  model: $('#assist-model'),
+  key: $('#assist-key'),
+  scope: $('#assist-scope'),
+  instruction: $('#assist-instruction'),
+  panel: $('#assist-panel'),
+  info: $('#assist-info'),
+  results: $('#assist-results'),
+  list: $('#assist-list'),
+  count: $('#assist-count'),
+  apply: $('#btn-assist-apply'),
+};
+
+let providers = [];
+
+api('/api/llm/providers')
+  .then((data) => {
+    providers = data.providers || [];
+    assist.provider.innerHTML = '';
+    providers.forEach((p) => {
+      const option = document.createElement('option');
+      option.value = p.key;
+      option.textContent = p.available ? p.label : `${p.label} — paquet absent`;
+      option.disabled = !p.available;
+      assist.provider.appendChild(option);
+    });
+    // On présélectionne un fournisseur réellement utilisable.
+    const usable = providers.find((p) => p.available);
+    if (usable) assist.provider.value = usable.key;
+    else assist.provider.innerHTML = '<option value="">Aucun paquet LLM installé</option>';
+    syncProvider();
+  })
+  .catch(() => { /* serveur trop ancien : le panneau restera inerte */ });
+
+/* La clé vit dans le sessionStorage de l'onglet : elle disparaît à sa fermeture,
+   n'est jamais écrite sur le disque du serveur, et n'est envoyée qu'au moment
+   d'une analyse. Une par fournisseur, pour pouvoir en garder plusieurs. */
+const keyStore = (p) => `lemonpdf.key.${p}`;
+
+function syncProvider() {
+  const chosen = providers.find((p) => p.key === assist.provider.value);
+  assist.model.placeholder = chosen ? chosen.default_model : 'modèle';
+  try {
+    assist.key.value = sessionStorage.getItem(keyStore(assist.provider.value)) || '';
+  } catch (_) { /* sessionStorage indisponible : la clé se retapera */ }
+}
+
+assist.provider.addEventListener('change', syncProvider);
+assist.key.addEventListener('change', () => {
+  try {
+    if (assist.key.value) sessionStorage.setItem(keyStore(assist.provider.value), assist.key.value);
+    else sessionStorage.removeItem(keyStore(assist.provider.value));
+  } catch (_) { /* sans importance */ }
+});
+
+$('#btn-assist').addEventListener('click', () => toggleAssist());
+
+function toggleAssist(force) {
+  const show = force !== undefined ? force : assist.panel.hidden;
+  assist.panel.hidden = !show;
+  $('#btn-assist').classList.toggle('active', show);
+  if (show) { toggleFind(false); togglePages(false); assist.instruction.focus(); }
+}
+
+/** Page la plus proche du centre de la fenêtre : c'est celle que l'utilisateur regarde. */
+function currentPage() {
+  const middle = el.main.getBoundingClientRect().top + el.main.clientHeight / 2;
+  let best = 0;
+  let bestGap = Infinity;
+  el.viewer.querySelectorAll('.page').forEach((node) => {
+    const rect = node.getBoundingClientRect();
+    const gap = Math.abs((rect.top + rect.bottom) / 2 - middle);
+    if (gap < bestGap) { bestGap = gap; best = +node.dataset.page; }
+  });
+  return best;
+}
+
+$('#btn-assist-run').addEventListener('click', runAssist);
+assist.instruction.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); runAssist(); }
+});
+
+async function runAssist() {
+  if (!state.docId) return;
+  if (!assist.provider.value) return toast('Aucun paquet LLM installé côté serveur.', true);
+  if (!assist.key.value.trim()) return toast('Collez votre clé API.', true);
+  if (!assist.instruction.value.trim()) return toast('Indiquez ce qu’il faut corriger.', true);
+
+  const scopeDocument = assist.scope.value === 'document';
+  assist.results.hidden = true;
+  assist.info.textContent = '';
+  busy(true, 'Relecture par le modèle…');
+  try {
+    const data = await postJSON(`/api/${state.docId}/assist`, {
+      instruction: assist.instruction.value.trim(),
+      provider: assist.provider.value,
+      api_key: assist.key.value.trim(),
+      model: assist.model.value.trim(),
+      page: scopeDocument ? null : currentPage(),
+    });
+    renderSuggestions(data);
+  } catch (err) {
+    toast(err.message, true);
+  } finally {
+    busy(false);
+  }
+}
+
+function renderSuggestions(data) {
+  const found = data.suggestions || [];
+  const examined = `${data.examined} fragment(s) examiné(s)`;
+  assist.info.textContent = found.length
+    ? `${found.length} proposition(s) — ${examined}`
+    : `Aucune correction proposée — ${examined}`;
+  if (data.truncated) {
+    // Mieux vaut le dire que laisser croire que tout a été relu.
+    toast('Document trop long : seul le début a été analysé. Relancez page par page.', true);
+  }
+  if (!found.length) { assist.results.hidden = true; return; }
+
+  assist.list.innerHTML = '';
+  found.forEach((s, i) => {
+    const li = document.createElement('li');
+    li.innerHTML = `
+      <label class="pick"><input type="checkbox" checked></label>
+      <div class="texts">
+        <span class="page-ref">p. ${s.page + 1}</span>
+        <del></del>
+        <ins></ins>
+        <em class="why"></em>
+      </div>
+      <button class="goto" title="Voir dans la page">↗</button>`;
+    li.querySelector('del').textContent = s.original;
+    li.querySelector('ins').textContent = s.text;
+    li.querySelector('.why').textContent = s.reason;
+    li.querySelector('input').addEventListener('change', updateAssistCount);
+    li.querySelector('.goto').addEventListener('click', () => {
+      const node = pageNode(s.page);
+      if (node) node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+    li._suggestion = s;
+    li.dataset.index = String(i);
+    assist.list.appendChild(li);
+  });
+  assist.results.hidden = false;
+  updateAssistCount();
+}
+
+const pickedSuggestions = () =>
+  [...assist.list.querySelectorAll('li')].filter((li) => li.querySelector('input').checked);
+
+function updateAssistCount() {
+  const picked = pickedSuggestions().length;
+  assist.count.textContent = `${picked} sélectionnée(s)`;
+  assist.apply.disabled = picked === 0;
+}
+
+const setAllPicks = (checked) => {
+  assist.list.querySelectorAll('input').forEach((box) => { box.checked = checked; });
+  updateAssistCount();
+};
+$('#btn-assist-all').addEventListener('click', () => setAllPicks(true));
+$('#btn-assist-none').addEventListener('click', () => setAllPicks(false));
+
+assist.apply.addEventListener('click', async () => {
+  const picked = pickedSuggestions();
+  if (!picked.length) return;
+  // On passe par la route d'édition ordinaire : même vérification du texte
+  // d'origine, même pile d'annulation. Le LLM n'a aucun accès direct au PDF.
+  const edits = picked.map((li) => ({
+    id: li._suggestion.id,
+    text: li._suggestion.text,
+    original: li._suggestion.original,
+  }));
+  busy(true, 'Application des corrections…');
+  try {
+    const data = await postJSON(`/api/${state.docId}/edit`, { edits });
+    applyState(data);
+    refreshAll();
+    assist.results.hidden = true;
+    assist.info.textContent = `${data.changed} correction(s) appliquée(s)`;
+    const skipped = data.skipped ? `, ${data.skipped} ignorée(s)` : '';
+    toast(`${data.changed} correction(s) appliquée(s)${skipped} — Ctrl+Z pour annuler`);
   } catch (err) {
     toast(err.message, true);
   } finally {
@@ -1175,6 +1368,7 @@ $('#btn-close').addEventListener('click', async () => {
   el.docActions.hidden = true;
   toggleFind(false);
   togglePages(false);
+  toggleAssist(false);
   setMode(null);
   setLens(false);
   resetSearch();

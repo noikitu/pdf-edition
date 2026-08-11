@@ -68,6 +68,7 @@ répartiteur avec des sessions collantes, pas plusieurs workers.
 | Effacer ou noircir une zone | « Caviarder », tracer un rectangle, puis « Effacer » ou « Noircir » |
 | Surligner | « Surligner », puis cliquer un texte |
 | Regarder de près | 🔍 active la loupe ; la molette règle le grossissement (1,5× à 6×) |
+| Faire relire par un LLM | « Assistant » → fournisseur, clé API, consigne, « Analyser », puis cocher les corrections retenues |
 | Gérer les pages | au survol d'une page : pivoter, monter, descendre, supprimer |
 | Fusionner / extraire | « Fusionner » ajoute un PDF à la fin ; « Pages » extrait une sélection (`1-3, 5, 8-`) |
 | Alléger le fichier | « Compresser » |
@@ -80,6 +81,36 @@ lecteur permettrait de contourner. `Échap` quitte le mode en cours.
 
 Le remplacement global respecte la casse d'origine : `ortografe → orthographe`
 transforme aussi `Ortografe` en `Orthographe`.
+
+## Assistance par LLM (facultative)
+
+Un modèle peut relire le texte et **proposer** des corrections. Il n'a aucun accès direct
+au PDF : il reçoit des fragments de texte, renvoie des remplacements, et l'application
+passe ensuite par la même route d'édition que le reste de l'app — donc par la pile
+d'annulation. Rien n'est modifié sans que vous ayez coché la proposition.
+
+```bash
+pip install -r requirements-llm.txt      # OpenAI, Gemini et Anthropic
+```
+
+Chaque fournisseur est indépendant : n'installez que celui qui vous intéresse
+(`langchain-openai`, `langchain-google-genai` ou `langchain-anthropic`). Le panneau
+« Assistant » grise ceux dont le paquet est absent. Le champ « Modèle » est libre : si un
+nom de modèle a changé depuis, saisissez-le sans attendre une mise à jour de l'app.
+
+À savoir avant d'activer :
+
+- **Le texte des pages analysées est envoyé au fournisseur choisi.** Le fichier lui-même
+  ne quitte pas la machine, mais son contenu textuel, si. C'est le seul endroit de l'app
+  où quelque chose sort, et il faut une action explicite pour cela.
+- **La clé API n'est jamais stockée côté serveur** : elle accompagne la requête d'analyse
+  et n'est ni journalisée ni conservée. Le navigateur la garde dans le `sessionStorage` de
+  l'onglet, effacé à sa fermeture.
+- Sur un document long, l'analyse est découpée en lots. Au-delà de douze, elle s'arrête et
+  le signale plutôt que de laisser croire que tout a été relu — analysez alors page par page.
+
+LangChain ne sert qu'à une chose ici, mais elle compte : une interface unique pour les
+trois fournisseurs et une sortie structurée validée, sans écrire un adaptateur par API.
 
 ## Comment ça marche
 

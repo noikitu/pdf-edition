@@ -1029,7 +1029,9 @@ button.active {
   /* Déplacement par transform : à chaque mouvement de souris, `left`/`top`
      relanceraient une mise en page complète. */
   will-change: transform;
-  filter: drop-shadow(0 16px 34px rgba(0, 0, 0, .3)) drop-shadow(0 3px 8px rgba(0, 0, 0, .18));
+  /* Aucune ombre portée : elle posait la loupe *au-dessus* de la page, comme un
+     objet flottant. Sans elle, le verre affleure le papier — et c'est la
+     réfraction du rebord, seule, qui le rend perceptible. */
 }
 
 /* le curseur système n'a plus d'intérêt : la loupe est centrée sur lui */

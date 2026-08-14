@@ -1737,7 +1737,7 @@ function trimSignature() {
 
 /* ------------------------------------------------------------------- loupe */
 
-const LENS_SIZE = 180;                  // diamètre de la loupe, en pixels d'écran
+const LENS_SIZE = 240;                  // diamètre de la loupe, en pixels d'écran
 const LENS_MIN = 1.5, LENS_MAX = 6;
 
 el.lensBtn.addEventListener('click', () => setLens(!state.lens));
@@ -1899,8 +1899,10 @@ function drawLens(node, clientX, clientY) {
 
       // Éclairage : seul le rebord est en pente, il est donc le seul assombri.
       // Le centre, plat, ne doit porter aucun dégradé — c'est ce qui distingue
-      // une loupe posée sur la page d'une bille de verre.
-      const shade = 1 - 0.42 * fringe * fringe;
+      // une loupe posée sur la page d'une bille de verre. L'assombrissement
+      // reste léger : sans ombre portée, c'est la réfraction qui doit signaler
+      // le verre, pas un cerne.
+      const shade = 1 - 0.15 * fringe * fringe;
       const spec = specular(dx / R, dy / R, r);
 
       dst[i] = Math.min(255, red * shade + spec);
@@ -1959,11 +1961,15 @@ function bilinear1(src, spanX, spanY, x, y, c) {
 function specular(nx, ny, r) {
   const dx = nx + 0.36, dy = ny + 0.44;
   const near = dx * dx + dy * dy;
-  const sheen = Math.max(0, 1 - near * 6) * 26;
+  // Voile central presque imperceptible : il ne doit pas laiter le texte.
+  const sheen = Math.max(0, 1 - near * 6) * 12;
   const edge = r > LENS_FLAT
-    ? Math.max(0, 1 - near * 0.9) * ((r - LENS_FLAT) / (1 - LENS_FLAT)) ** 1.5 * 150
+    ? Math.max(0, 1 - near * 0.9) * ((r - LENS_FLAT) / (1 - LENS_FLAT)) ** 1.6 * 88
     : 0;
-  return sheen + edge;
+  // Fin liseré sur la tranche extérieure : sans ombre portée, c'est lui qui
+  // détache le disque d'un fond blanc, en une poignée de pixels.
+  const lip = r > 0.965 ? ((r - 0.965) / 0.035) ** 2 * 52 : 0;
+  return sheen + edge + lip;
 }
 
 /* Un seul tampon, réutilisé d'une image à l'autre : en allouer un à chaque

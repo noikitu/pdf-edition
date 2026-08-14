@@ -190,6 +190,18 @@ def state(doc_id: str) -> dict:
     return {"doc_id": doc_id, "name": session.name, **_state(session)}
 
 
+@app.get("/api/{doc_id}/info")
+def info(doc_id: str) -> dict:
+    """Fiche du document : métadonnées, dates, dimensions, contenus annexes."""
+    session = _session(doc_id)
+    return {
+        "name": session.name,
+        "size": session.size,
+        "version": session.version,
+        **pdf_ops.document_info(session.doc),
+    }
+
+
 @app.get("/api/{doc_id}/scan")
 def scan_report(doc_id: str) -> dict:
     """Pages dépourvues de texte extractible (scans).

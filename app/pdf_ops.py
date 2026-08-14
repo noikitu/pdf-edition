@@ -183,6 +183,62 @@ def pages_without_text(doc: fitz.Document) -> list[int]:
     return [pno for pno, page in enumerate(doc) if not page.get_text("text").strip()]
 
 
+def _pdf_date(value: str) -> str:
+    """Convertit une date PDF (« D:20240115103000+01'00' ») en ISO 8601.
+
+    Le format est celui d'ISO 32000 : préfixe optionnel, champs facultatifs à
+    partir du mois, et décalage horaire noté avec des apostrophes. Une date
+    illisible est renvoyée telle quelle plutôt que masquée — mieux vaut afficher
+    une chaîne étrange que prétendre qu'il n'y a pas de date.
+    """
+    if not value:
+        return ""
+    m = re.match(
+        r"D?:?(\d{4})(\d{2})?(\d{2})?(\d{2})?(\d{2})?(\d{2})?"
+        # Le temps universel s'écrit d'un simple « Z », sans chiffres derrière :
+        # il lui faut sa propre alternative, sans quoi tout le groupe échoue et
+        # le fuseau disparaît silencieusement.
+        r"(?:([Zz])|([+-])(\d{2})'?(\d{2})?)?",
+        value.strip(),
+    )
+    if not m:
+        return value
+    year, month, day, hour, minute, second, zulu, sign, tzh, tzm = m.groups()
+    stamp = f"{year}-{month or '01'}-{day or '01'}T{hour or '00'}:{minute or '00'}:{second or '00'}"
+    if zulu:
+        stamp += "+00:00"
+    elif sign:
+        stamp += f"{sign}{tzh or '00'}:{tzm or '00'}"
+    return stamp
+
+
+def document_info(doc: fitz.Document) -> dict:
+    """Fiche d'identité du document : métadonnées, dimensions, contenus annexes."""
+    meta = doc.metadata or {}
+    first = doc[0].rect if doc.page_count else fitz.Rect(0, 0, 0, 0)
+    annots = sum(1 for pno in range(doc.page_count) for _ in doc[pno].annots())
+    return {
+        "title": meta.get("title") or "",
+        "author": meta.get("author") or "",
+        "subject": meta.get("subject") or "",
+        "keywords": meta.get("keywords") or "",
+        "creator": meta.get("creator") or "",       # logiciel d'origine
+        "producer": meta.get("producer") or "",     # logiciel ayant écrit le PDF
+        "format": meta.get("format") or "",
+        "created": _pdf_date(meta.get("creationDate") or ""),
+        "modified": _pdf_date(meta.get("modDate") or ""),
+        "encrypted": bool(meta.get("encryption")),
+        "pages": doc.page_count,
+        "width_pt": round(first.width, 1),
+        "height_pt": round(first.height, 1),
+        # Les dimensions en millimètres parlent davantage que les points.
+        "width_mm": round(first.width * 25.4 / 72, 1),
+        "height_mm": round(first.height * 25.4 / 72, 1),
+        "annotations": annots,
+        "fields": len(list_fields(doc)),
+    }
+
+
 def page_info(doc: fitz.Document) -> list[dict]:
     return [
         {"number": i, "width": round(p.rect.width, 2), "height": round(p.rect.height, 2)}

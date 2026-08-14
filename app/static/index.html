@@ -35,7 +35,7 @@
   <span class="idle-note" id="idle-note">Aucun document ouvert</span>
 
   <div class="group" id="doc-actions" hidden>
-    <span class="filename" id="filename"></span>
+    <button class="filename" id="filename" title="Voir la fiche du document"></button>
     <span class="badge" id="mod-count" hidden></span>
     <button id="btn-assist" class="primary" title="Faire relire le texte par un LLM">✨ Assistant</button>
     <button id="btn-close" class="icon" title="Fermer le document">✕</button>
@@ -209,6 +209,17 @@
   <button id="btn-zoom-in" class="icon" title="Zoomer">+</button>
   <span class="sep"></span>
   <button id="btn-lens" class="icon" title="Loupe : grossit sous le curseur (molette pour régler)">🔍</button>
+</div>
+
+<!-- Fiche du document, ouverte par un clic sur le nom du fichier. -->
+<div id="info-modal" class="modal" hidden>
+  <div class="modal-card info-card">
+    <div class="info-head">
+      <h2 id="info-name">Document</h2>
+      <button id="info-close" class="icon" title="Fermer">✕</button>
+    </div>
+    <dl id="info-list" class="info-list"></dl>
+  </div>
 </div>
 
 <!-- Signature manuscrite : le tracé est rogné à son encadrement puis envoyé

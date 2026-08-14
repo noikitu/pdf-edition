@@ -23,6 +23,7 @@ class Session:
         self.redo_stack: list[bytes] = []
         self.version = 0
         self.saved_version = -1
+        self.size = len(data)     # poids du document, tenu à jour par autosave
         self.touched = time.time()
 
     def autosave(self) -> None:
@@ -34,9 +35,11 @@ class Session:
         """
         if not persist.enabled() or self.saved_version == self.version:
             return
-        persist.save(
-            self.doc_id, self.name, self.doc.tobytes(garbage=3, deflate=True), self.version
-        )
+        data = self.doc.tobytes(garbage=3, deflate=True)
+        # Le poids est relevé au passage : le recalculer pour la fiche du
+        # document exigerait de sérialiser à nouveau tout le PDF.
+        self.size = len(data)
+        persist.save(self.doc_id, self.name, data, self.version)
         self.saved_version = self.version
 
     # -- historique ---------------------------------------------------------

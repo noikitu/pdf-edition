@@ -1445,6 +1445,77 @@ assist.apply.addEventListener('click', async () => {
   }
 });
 
+/* ------------------------------------------------------- fiche du document */
+
+el.filename.addEventListener('click', showInfo);
+$('#info-close').addEventListener('click', () => { $('#info-modal').hidden = true; });
+
+/** Champs de la fiche, dans l'ordre d'affichage. `format` traduit la valeur
+    brute renvoyée par le serveur en quelque chose de lisible. */
+const INFO_ROWS = [
+  ['Titre', (d) => d.title],
+  ['Auteur', (d) => d.author],
+  ['Sujet', (d) => d.subject],
+  ['Mots-clés', (d) => d.keywords],
+  ['Créé le', (d) => formatDate(d.created)],
+  ['Modifié le', (d) => formatDate(d.modified)],
+  ['Créé avec', (d) => d.creator],
+  ['Produit par', (d) => d.producer],
+  ['Format', (d) => d.format],
+  ['Pages', (d) => String(d.pages)],
+  ['Dimensions', (d) => `${d.width_mm} × ${d.height_mm} mm (${d.width_pt} × ${d.height_pt} pt)`],
+  ['Poids', (d) => formatSize(d.size)],
+  ['Annotations', (d) => (d.annotations ? String(d.annotations) : '')],
+  ['Champs de formulaire', (d) => (d.fields ? String(d.fields) : '')],
+  ['Protection', (d) => (d.encrypted ? 'chiffré' : '')],
+];
+
+async function showInfo() {
+  if (!state.docId) return;
+  const list = $('#info-list');
+  list.innerHTML = '';
+  $('#info-name').textContent = state.name;
+  $('#info-modal').hidden = false;
+  try {
+    const data = await api(`/api/${state.docId}/info`);
+    let shown = 0;
+    INFO_ROWS.forEach(([label, read]) => {
+      const value = read(data);
+      // Un champ vide n'apprend rien : la plupart des PDF n'en renseignent
+      // qu'une poignée, et les lister tous noierait ceux qui comptent.
+      if (!value) return;
+      const dt = document.createElement('dt');
+      dt.textContent = label;
+      const dd = document.createElement('dd');
+      dd.textContent = value;
+      list.append(dt, dd);
+      shown++;
+    });
+    if (!shown) {
+      const dd = document.createElement('dd');
+      dd.className = 'info-empty';
+      dd.textContent = 'Ce PDF ne porte aucune métadonnée.';
+      list.appendChild(dd);
+    }
+  } catch (err) {
+    const dd = document.createElement('dd');
+    dd.className = 'info-empty';
+    dd.textContent = err.message;
+    list.appendChild(dd);
+  }
+}
+
+/** Date ISO renvoyée par le serveur → texte lisible dans la langue du navigateur. */
+function formatDate(iso) {
+  if (!iso) return '';
+  const date = new Date(iso);
+  if (isNaN(date)) return iso;      // date PDF illisible : on la montre brute
+  return date.toLocaleString('fr-FR', {
+    day: 'numeric', month: 'long', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  });
+}
+
 /* ------------------------------------------------------ PDF scannés (sans texte) */
 
 $('#notice-close').addEventListener('click', () => { el.notice.hidden = true; });
@@ -2142,6 +2213,7 @@ $('#btn-close').addEventListener('click', async () => {
 document.addEventListener('keydown', (e) => {
   // Échap quitte le mode en cours ; l'édition d'un fragment gère sa propre
   // touche Échap, on ne lui marche donc pas dessus.
+  if (e.key === 'Escape' && !$('#info-modal').hidden) { $('#info-modal').hidden = true; return; }
   if (e.key === 'Escape' && !el.signModal.hidden) { el.signModal.hidden = true; return; }
   if (e.key === 'Escape' && menuOpen()) { setMenu(false); return; }
   const inMode = state.adding || state.highlighting || state.redacting || state.placing;

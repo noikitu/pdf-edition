@@ -116,9 +116,20 @@ nom de modèle a changé depuis, saisissez-le sans attendre une mise à jour de 
 - **Le texte des pages analysées est envoyé au fournisseur choisi.** Le fichier lui-même
   ne quitte pas la machine, mais son contenu textuel, si. C'est le seul endroit de l'app
   où quelque chose sort, et il faut une action explicite pour cela.
-- **La clé API n'est jamais stockée côté serveur** : elle accompagne la requête d'analyse
-  et n'est ni journalisée ni conservée. Le navigateur la garde dans le `sessionStorage` de
-  l'onglet, effacé à sa fermeture.
+- **La clé API n'existe jamais côté navigateur.** Elle est envoyée une fois, puis conservée
+  par le serveur ; l'interface n'apprend que son existence, jamais sa valeur, et le champ
+  reste vide même lorsqu'une clé est enregistrée. Rien n'est écrit dans le `localStorage`,
+  le `sessionStorage` ni un cookie : une clé qui ne transite pas ne peut être lue ni par
+  une extension, ni par un script tiers, ni dans le profil du navigateur.
+- **Le trousseau du système d'abord.** Si le paquet `keyring` est installé, la clé y est
+  confiée — chiffrée au repos, protégée par la session de l'utilisateur. À défaut seulement,
+  elle tombe dans `~/.lemonpdf/keys.json`, créé d'emblée en lecture pour son seul
+  propriétaire. Une variable d'environnement (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
+  `GOOGLE_API_KEY`) est préférée à tout le reste : dans ce cas l'application n'écrit rien.
+- **Rien de tout cela hors de la machine.** Enregistrer ou utiliser une clé conservée est
+  refusé si la requête ne vient pas de `localhost` : sur une instance partagée, une clé
+  enregistrée serait une clé offerte — et facturée — à tous les visiteurs. Il reste possible
+  de saisir la sienne pour une analyse.
 - Sur un document long, l'analyse est découpée en lots. Au-delà de douze, elle s'arrête et
   le signale plutôt que de laisser croire que tout a été relu — analysez alors page par page.
 

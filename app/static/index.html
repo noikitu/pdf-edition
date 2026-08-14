@@ -117,9 +117,11 @@
       <input id="assist-model" type="text" placeholder="modèle par défaut">
     </label>
     <label>Clé API
-      <input id="assist-key" type="password" placeholder="collée ici, jamais enregistrée sur le serveur"
+      <input id="assist-key" type="password" placeholder="collez votre clé"
              autocomplete="off" spellcheck="false">
     </label>
+    <label class="check"><input id="assist-remember" type="checkbox" checked> Retenir sur cette machine</label>
+    <button id="btn-key-forget" hidden>Oublier la clé</button>
     <label>Portée
       <select id="assist-scope">
         <option value="page">Page affichée</option>
@@ -141,6 +143,7 @@
   <p class="assist-warning">
     Le PDF n’est pas envoyé au fournisseur, mais le <strong>texte</strong> des pages analysées l’est.
     Rien n’est modifié sans votre validation, et <kbd>Ctrl+Z</kbd> annule ce qui a été appliqué.
+    <span id="assist-key-note"></span>
   </p>
 
   <div id="assist-results" class="assist-results" hidden>

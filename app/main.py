@@ -7,12 +7,12 @@ import re
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import fonts, llm, pdf_ops, persist
+from . import fonts, keystore, llm, pdf_ops, persist
 from .config import MAX_UPLOAD_MB
 from .store import Session, store
 
@@ -20,6 +20,25 @@ BASE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = BASE_DIR / "static"
 
 app = FastAPI(title="LemonPDF", docs_url="/api/docs", openapi_url="/api/openapi.json")
+
+
+LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost"}
+
+
+def _local_only(request: Request) -> None:
+    """Interdit l'accès aux clés enregistrées depuis une autre machine.
+
+    Une clé conservée par le serveur appartient à la personne assise devant lui.
+    Si l'instance est exposée à d'autres, la laisser servir à un visiteur
+    reviendrait à lui prêter la clé — et à lui en faire payer l'usage.
+    """
+    host = request.client.host if request.client else ""
+    if host not in LOCAL_HOSTS:
+        raise HTTPException(
+            403,
+            "Les clés enregistrées ne sont accessibles que depuis la machine qui "
+            "héberge l'application. Saisissez votre clé pour cette analyse.",
+        )
 
 
 def _session(doc_id: str) -> Session:
@@ -103,11 +122,17 @@ class FieldsPayload(BaseModel):
 class AssistPayload(BaseModel):
     instruction: str
     provider: str
-    # La clé n'est ni journalisée, ni stockée, ni renvoyée : elle ne sert qu'à
-    # l'appel sortant de cette requête.
-    api_key: str
+    # Clé saisie pour cette analyse seulement. Vide, on se rabat sur celle
+    # enregistrée sur la machine. Elle n'est ni journalisée ni renvoyée.
+    api_key: str = ""
+    remember: bool = False       # enregistrer la clé saisie pour les fois suivantes
     model: str = ""
     page: Optional[int] = None   # None = tout le document
+
+
+class KeyPayload(BaseModel):
+    provider: str
+    api_key: str
 
 
 class RedactPayload(BaseModel):
@@ -288,8 +313,36 @@ def llm_providers() -> dict:
     return {"providers": llm.catalogue()}
 
 
+@app.get("/api/llm/keys")
+def key_status(request: Request) -> dict:
+    """Quels fournisseurs disposent d'une clé — jamais sa valeur."""
+    _local_only(request)
+    return keystore.status()
+
+
+@app.post("/api/llm/keys")
+def key_save(request: Request, payload: KeyPayload) -> dict:
+    _local_only(request)
+    llm.get_provider(payload.provider)          # refuse un fournisseur inconnu
+    if not payload.api_key.strip():
+        raise HTTPException(400, "Clé vide.")
+    if keystore.from_env(payload.provider):
+        raise HTTPException(
+            400, "Une clé est déjà fournie par l'environnement pour ce fournisseur."
+        )
+    where = keystore.save(payload.provider, payload.api_key.strip())
+    return {"saved": True, "where": where, **keystore.status()}
+
+
+@app.delete("/api/llm/keys/{provider}")
+def key_forget(request: Request, provider: str) -> dict:
+    _local_only(request)
+    keystore.forget(provider)
+    return {"forgotten": True, **keystore.status()}
+
+
 @app.post("/api/{doc_id}/assist")
-def assist(doc_id: str, payload: AssistPayload) -> dict:
+def assist(doc_id: str, request: Request, payload: AssistPayload) -> dict:
     """Demande des corrections au LLM. N'applique rien : l'utilisateur valide.
 
     Le PDF n'est pas transmis au fournisseur, seulement le texte des fragments.
@@ -297,7 +350,14 @@ def assist(doc_id: str, payload: AssistPayload) -> dict:
     session = _session(doc_id)
     if not payload.instruction.strip():
         raise HTTPException(400, "Indiquez ce que le modèle doit corriger.")
-    if not payload.api_key.strip():
+
+    api_key = payload.api_key.strip()
+    is_local = (request.client.host if request.client else "") in LOCAL_HOSTS
+    if api_key and payload.remember and is_local:
+        keystore.save(payload.provider, api_key)
+    if not api_key and is_local:
+        api_key = keystore.get(payload.provider)
+    if not api_key:
         raise HTTPException(400, "Clé API manquante.")
 
     if payload.page is None:
@@ -313,7 +373,7 @@ def assist(doc_id: str, payload: AssistPayload) -> dict:
             pages,
             payload.instruction.strip(),
             payload.provider,
-            payload.api_key.strip(),
+            api_key,
             payload.model.strip(),
         )
     except ValueError as exc:            # fournisseur inconnu

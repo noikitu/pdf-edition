@@ -1197,6 +1197,8 @@ const assist = {
   list: $('#assist-list'),
   count: $('#assist-count'),
   apply: $('#btn-assist-apply'),
+  remember: $('#assist-remember'),
+  keyNote: $('#assist-key-note'),
 };
 
 let providers = [];
@@ -1216,29 +1218,59 @@ api('/api/llm/providers')
     const usable = providers.find((p) => p.available);
     if (usable) assist.provider.value = usable.key;
     else assist.provider.innerHTML = '<option value="">Aucun paquet LLM installé</option>';
-    syncProvider();
+    refreshKeys();
   })
   .catch(() => { /* serveur trop ancien : le panneau restera inerte */ });
 
-/* La clé vit dans le sessionStorage de l'onglet : elle disparaît à sa fermeture,
-   n'est jamais écrite sur le disque du serveur, et n'est envoyée qu'au moment
-   d'une analyse. Une par fournisseur, pour pouvoir en garder plusieurs. */
-const keyStore = (p) => `lemonpdf.key.${p}`;
+/* Les clés ne sont jamais conservées par le navigateur — ni localStorage, ni
+   sessionStorage, ni cookie. Elles vivent côté serveur, dans le trousseau du
+   système quand il existe, et la page n'apprend jamais que leur existence. Le
+   champ reste donc vide même lorsqu'une clé est enregistrée. */
+let keyStatus = { providers: {}, where: '' };
+
+async function refreshKeys() {
+  try {
+    keyStatus = await api('/api/llm/keys');
+  } catch (_) {
+    // 403 : instance consultée à distance, les clés enregistrées sont hors jeu.
+    keyStatus = { providers: {}, where: '' };
+  }
+  syncProvider();
+}
 
 function syncProvider() {
   const chosen = providers.find((p) => p.key === assist.provider.value);
   assist.model.placeholder = chosen ? chosen.default_model : 'modèle';
-  try {
-    assist.key.value = sessionStorage.getItem(keyStore(assist.provider.value)) || '';
-  } catch (_) { /* sessionStorage indisponible : la clé se retapera */ }
+
+  const info = (keyStatus.providers || {})[assist.provider.value] || {};
+  assist.key.value = '';
+  $('#btn-key-forget').hidden = !(info.stored && info.editable);
+  $('#assist-remember').parentElement.hidden = !!info.from_env;
+
+  if (info.from_env) {
+    assist.key.placeholder = 'fournie par l’environnement';
+    assist.keyNote.textContent =
+      ' La clé vient d’une variable d’environnement : rien n’est enregistré par l’application.';
+  } else if (info.stored) {
+    assist.key.placeholder = 'clé enregistrée — laissez vide pour l’utiliser';
+    assist.keyNote.textContent =
+      ` La clé est conservée dans le ${keyStatus.where}, sur cette machine, et n’est jamais renvoyée à cette page.`;
+  } else {
+    assist.key.placeholder = 'collez votre clé';
+    assist.keyNote.textContent = '';
+  }
 }
 
 assist.provider.addEventListener('change', syncProvider);
-assist.key.addEventListener('change', () => {
+
+$('#btn-key-forget').addEventListener('click', async () => {
   try {
-    if (assist.key.value) sessionStorage.setItem(keyStore(assist.provider.value), assist.key.value);
-    else sessionStorage.removeItem(keyStore(assist.provider.value));
-  } catch (_) { /* sans importance */ }
+    keyStatus = await api(`/api/llm/keys/${assist.provider.value}`, { method: 'DELETE' });
+    syncProvider();
+    toast('Clé oubliée');
+  } catch (err) {
+    toast(err.message, true);
+  }
 });
 
 $('#btn-assist').addEventListener('click', () => toggleAssist());
@@ -1271,7 +1303,8 @@ assist.instruction.addEventListener('keydown', (e) => {
 async function runAssist() {
   if (!state.docId) return;
   if (!assist.provider.value) return toast('Aucun paquet LLM installé côté serveur.', true);
-  if (!assist.key.value.trim()) return toast('Collez votre clé API.', true);
+  const info = (keyStatus.providers || {})[assist.provider.value] || {};
+  if (!assist.key.value.trim() && !info.stored) return toast('Collez votre clé API.', true);
   if (!assist.instruction.value.trim()) return toast('Indiquez ce qu’il faut corriger.', true);
 
   const scopeDocument = assist.scope.value === 'document';
@@ -1283,9 +1316,12 @@ async function runAssist() {
       instruction: assist.instruction.value.trim(),
       provider: assist.provider.value,
       api_key: assist.key.value.trim(),
+      remember: assist.remember.checked,
       model: assist.model.value.trim(),
       page: scopeDocument ? null : currentPage(),
     });
+    // Le champ est vidé dès l'envoi : la clé n'a pas à traîner dans la page.
+    if (assist.key.value) { assist.key.value = ''; refreshKeys(); }
     renderSuggestions(data);
   } catch (err) {
     toast(err.message, true);

@@ -145,6 +145,7 @@ class FontResolver:
         # Verdict du contrôle de métriques, retenu par police : une fois qu'on
         # sait qu'un encodage ment, inutile de le remesurer à chaque fragment.
         self._trusted: dict[tuple, bool] = {}
+        self._witnesses: dict[tuple, tuple | None] = {}
 
     # -- niveau 1 : la police du PDF ---------------------------------------
     def _page_map(self, pno: int) -> dict[str, int]:
@@ -159,6 +160,45 @@ class FontResolver:
                 cached.setdefault(_norm(_SUBSET.sub("", basefont)), xref)
             self._page_maps[pno] = cached
         return cached
+
+    def _witness(self, pno: int, basefont: str):
+        """Trouve dans la page un texte déjà écrit avec cette police, pour servir
+        de témoin de largeur.
+
+        Sans lui, le contrôle des métriques ne s'exerçait que là où l'appelant
+        pouvait fournir une mesure — et il suffisait d'un seul chemin sans mesure,
+        par exemple un mot en gras au milieu d'un paragraphe recomposé, pour
+        qu'une police à l'encodage faux passe malgré tout. Le témoin se prend
+        désormais dans le document lui-même : la vérification n'est plus
+        facultative.
+        """
+        key = (pno, _norm(basefont))
+        if key in self._witnesses:
+            return self._witnesses[key]
+        best = None
+        try:
+            raw = self.doc[pno].get_text("dict", flags=fitz.TEXTFLAGS_DICT)
+            for block in raw.get("blocks", []):
+                for line in block.get("lines", []):
+                    # Un texte pivoté n'a pas la largeur qu'on croit mesurer.
+                    if abs(line.get("dir", (1, 0))[1]) > 0.01:
+                        continue
+                    for span in line.get("spans", []):
+                        if _norm(span["font"]) != _norm(basefont):
+                            continue
+                        text = span["text"]
+                        width = span["bbox"][2] - span["bbox"][0]
+                        # Plus le témoin est long, plus la mesure est fiable :
+                        # sur trois caractères, un écart de crénage suffit à
+                        # brouiller le verdict.
+                        if len(text.strip()) < 8 or width <= 1:
+                            continue
+                        if best is None or len(text) > len(best[0]):
+                            best = (text, span["size"], width)
+        except Exception:
+            best = None
+        self._witnesses[key] = best
+        return best
 
     def _load_embedded(self, xref: int) -> tuple[bytes, fitz.Font] | None:
         if xref not in self._embedded:
@@ -224,6 +264,10 @@ class FontResolver:
         repli Base-14, qui est la seule véritable approximation.
         """
         family, bold, italic = parse_basefont(basefont)
+        # À défaut de mesure fournie, on en cherche une dans la page : le contrôle
+        # des métriques ne doit jamais pouvoir être contourné par un appelant qui
+        # n'en a pas sous la main.
+        probe = probe or self._witness(pno, basefont)
 
         page_map = self._page_map(pno)
         xref = page_map.get(_norm(basefont)) or page_map.get(_norm(family))

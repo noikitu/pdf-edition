@@ -353,8 +353,9 @@ def assist(doc_id: str, request: Request, payload: AssistPayload) -> dict:
 
     api_key = payload.api_key.strip()
     is_local = (request.client.host if request.client else "") in LOCAL_HOSTS
+    remembered = ""
     if api_key and payload.remember and is_local:
-        keystore.save(payload.provider, api_key)
+        remembered = keystore.save(payload.provider, api_key)
     if not api_key and is_local:
         api_key = keystore.get(payload.provider)
     if not api_key:
@@ -384,7 +385,9 @@ def assist(doc_id: str, request: Request, payload: AssistPayload) -> dict:
         # On renvoie le message du fournisseur : « invalid api key », « model not
         # found »… c'est presque toujours l'information utile.
         raise HTTPException(502, f"Le fournisseur a refusé la demande : {exc}") from exc
-    return result
+    # `remembered` dit où la clé a été conservée : l'interface peut le confirmer
+    # au lieu de laisser deviner à un champ vidé si l'enregistrement a eu lieu.
+    return {**result, "remembered": remembered}
 
 
 @app.post("/api/{doc_id}/image")

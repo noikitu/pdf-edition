@@ -121,6 +121,7 @@
              autocomplete="off" spellcheck="false">
     </label>
     <label class="check"><input id="assist-remember" type="checkbox" checked> Retenir sur cette machine</label>
+    <span class="key-state" id="key-state" hidden></span>
     <button id="btn-key-forget" hidden>Oublier la clé</button>
     <label>Portée
       <select id="assist-scope">
@@ -218,15 +219,7 @@
 
 <div id="overlay" class="overlay" hidden>
   <div class="spinner"></div>
-  <div class="squeeze-stage">
-    <img class="squeeze-photo" src="/squeezing.png" alt="Une main pressant un demi-citron">
-    <!-- Gouttes projetées : chaque <i> reçoit son angle, sa distance, sa taille et
-         son retard depuis le CSS, et part du citron en ligne droite. -->
-    <span class="juice" aria-hidden="true">
-      <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
-      <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
-    </span>
-  </div>
+  <img class="squeeze-photo" src="/squeezing.png" alt="Une main pressant un demi-citron">
   <span id="overlay-text">Chargement…</span>
 </div>
 

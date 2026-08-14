@@ -85,12 +85,20 @@ def _write_file(data: dict) -> None:
 
 
 def save(provider: str, key: str) -> str:
-    """Enregistre une clé. Renvoie l'emplacement retenu : trousseau ou fichier."""
+    """Enregistre une clé. Renvoie l'emplacement retenu : trousseau ou fichier.
+
+    L'écriture dans le trousseau est relue avant d'être déclarée réussie. Sur
+    certaines machines, l'accès au trousseau depuis un processus non signé donne
+    lieu à une autorisation refusée ou laissée sans réponse : `set_password`
+    n'échoue pas toujours, mais la relecture ne rend rien. Sans cette
+    vérification, la clé serait annoncée conservée puis introuvable.
+    """
     ring = _keyring()
     if ring is not None:
         try:
             ring.set_password(SERVICE, provider, key)
-            return "trousseau"
+            if ring.get_password(SERVICE, provider) == key:
+                return "trousseau"
         except Exception:
             pass
     data = _read_file()
@@ -127,10 +135,22 @@ def forget(provider: str) -> None:
         _write_file(data)
 
 
+def where(provider: str) -> str:
+    """Où se trouve réellement la clé de ce fournisseur."""
+    if from_env(provider):
+        return "variable d’environnement"
+    ring = _keyring()
+    if ring is not None:
+        try:
+            if ring.get_password(SERVICE, provider):
+                return "trousseau du système"
+        except Exception:
+            pass
+    return "fichier protégé" if _read_file().get(provider) else ""
+
+
 def status() -> dict:
     """Ce que l'interface a le droit de savoir : l'existence d'une clé, pas sa valeur."""
-    ring = _keyring()
-    where = "trousseau du système" if ring is not None else "fichier protégé"
     out = {}
     for provider in ENV_VARS:
         env = bool(from_env(provider))
@@ -140,5 +160,6 @@ def status() -> dict:
             # Une clé venue de l'environnement n'est pas la nôtre : ni à effacer,
             # ni à remplacer depuis l'interface.
             "editable": not env,
+            "where": where(provider),
         }
-    return {"providers": out, "where": where}
+    return {"providers": out}

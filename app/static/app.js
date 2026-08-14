@@ -1199,6 +1199,7 @@ const assist = {
   apply: $('#btn-assist-apply'),
   remember: $('#assist-remember'),
   keyNote: $('#assist-key-note'),
+  keyState: $('#key-state'),
 };
 
 let providers = [];
@@ -1226,14 +1227,14 @@ api('/api/llm/providers')
    sessionStorage, ni cookie. Elles vivent côté serveur, dans le trousseau du
    système quand il existe, et la page n'apprend jamais que leur existence. Le
    champ reste donc vide même lorsqu'une clé est enregistrée. */
-let keyStatus = { providers: {}, where: '' };
+let keyStatus = { providers: {} };
 
 async function refreshKeys() {
   try {
     keyStatus = await api('/api/llm/keys');
   } catch (_) {
     // 403 : instance consultée à distance, les clés enregistrées sont hors jeu.
-    keyStatus = { providers: {}, where: '' };
+    keyStatus = { providers: {} };
   }
   syncProvider();
 }
@@ -1245,16 +1246,21 @@ function syncProvider() {
   const info = (keyStatus.providers || {})[assist.provider.value] || {};
   assist.key.value = '';
   $('#btn-key-forget').hidden = !(info.stored && info.editable);
-  $('#assist-remember').parentElement.hidden = !!info.from_env;
+  assist.remember.parentElement.hidden = !!info.from_env || !!info.stored;
+
+  // Un champ vide ne dit pas si la clé est conservée : on l'affiche donc en clair,
+  // avec son emplacement, plutôt que de le laisser deviner.
+  assist.keyState.hidden = !info.stored;
+  assist.keyState.textContent = info.stored ? `✓ clé enregistrée (${info.where})` : '';
 
   if (info.from_env) {
     assist.key.placeholder = 'fournie par l’environnement';
     assist.keyNote.textContent =
       ' La clé vient d’une variable d’environnement : rien n’est enregistré par l’application.';
   } else if (info.stored) {
-    assist.key.placeholder = 'clé enregistrée — laissez vide pour l’utiliser';
+    assist.key.placeholder = 'laissez vide pour utiliser la clé enregistrée';
     assist.keyNote.textContent =
-      ` La clé est conservée dans le ${keyStatus.where}, sur cette machine, et n’est jamais renvoyée à cette page.`;
+      ` La clé est conservée dans le ${info.where}, sur cette machine, et n’est jamais renvoyée à cette page.`;
   } else {
     assist.key.placeholder = 'collez votre clé';
     assist.keyNote.textContent = '';
@@ -1262,6 +1268,9 @@ function syncProvider() {
 }
 
 assist.provider.addEventListener('change', syncProvider);
+
+const keyLocation = (where) =>
+  where === 'trousseau' ? 'trousseau du système' : 'fichier protégé de cette machine';
 
 $('#btn-key-forget').addEventListener('click', async () => {
   try {
@@ -1279,7 +1288,13 @@ function toggleAssist(force) {
   const show = force !== undefined ? force : assist.panel.hidden;
   assist.panel.hidden = !show;
   $('#btn-assist').classList.toggle('active', show);
-  if (show) { toggleFind(false); togglePages(false); toggleForm(false); assist.instruction.focus(); }
+  if (show) {
+    toggleFind(false);
+    togglePages(false);
+    toggleForm(false);
+    refreshKeys();
+    assist.instruction.focus();
+  }
 }
 
 /** Page la plus proche du centre de la fenêtre : c'est celle que l'utilisateur regarde. */
@@ -1321,7 +1336,11 @@ async function runAssist() {
       page: scopeDocument ? null : currentPage(),
     });
     // Le champ est vidé dès l'envoi : la clé n'a pas à traîner dans la page.
-    if (assist.key.value) { assist.key.value = ''; refreshKeys(); }
+    if (assist.key.value) {
+      assist.key.value = '';
+      await refreshKeys();
+      if (data.remembered) toast(`Clé enregistrée dans le ${keyLocation(data.remembered)}`);
+    }
     renderSuggestions(data);
   } catch (err) {
     toast(err.message, true);
@@ -1529,6 +1548,10 @@ function toggleForm(force) {
   toggleAssist(false);
   loadFields();
 }
+
+/* Panneau de l'assistant : l'état des clés est relu à chaque ouverture, pour ne
+   pas afficher une situation périmée après un redémarrage du serveur ou une
+   modification faite dans un autre onglet. */
 
 async function loadFields() {
   el.formFields.innerHTML = '';

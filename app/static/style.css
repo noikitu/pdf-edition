@@ -348,6 +348,20 @@ button.active {
 }
 #assist-info { font-size: 13px; color: var(--muted); padding-bottom: 9px; }
 
+/* État de la clé, dit explicitement : un champ vide ne distingue pas
+   « aucune clé » de « clé enregistrée, ne la retapez pas ». */
+.key-state {
+  font: 500 12px/1 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  color: var(--green);
+  background: rgba(214, 255, 224, .6);
+  border: 1px solid rgba(255, 255, 255, .8);
+  border-radius: var(--r-pill);
+  padding: 7px 11px;
+  margin-bottom: 8px;
+  white-space: nowrap;
+}
+#btn-key-forget { font-size: 12px; padding: 8px 11px; margin-bottom: 8px; }
+
 .assist-warning {
   margin: 0;
   font: 400 12px/1.5 'Helvetica Neue', Helvetica, Arial, sans-serif;
@@ -838,7 +852,10 @@ button.active {
   transform-origin: left center;
   transition: box-shadow .12s, background .12s;
 }
-.tf:hover { box-shadow: inset 0 0 0 1px rgba(214, 180, 0, .55); background: rgba(255, 255, 158, .28); }
+/* Pas de fond au survol : le curseur en barre d'insertion suffit à annoncer
+   qu'un texte est modifiable, et un aplat jaune sur chaque fragment traversé
+   rendait la lecture de la page pénible. Les modes surlignage et caviardage,
+   eux, gardent leur repère : là, le survol annonce un effet précis. */
 .tf.editing {
   color: inherit;
   background: var(--tf-bg, #fff);
@@ -1216,68 +1233,7 @@ button.active {
 /* -------------------------------------------------- « pressage » du citron */
 
 .overlay.squeezing .spinner { display: none; }
-.overlay:not(.squeezing) .squeeze-stage { display: none; }
-
-/* La scène porte la photo et les gouttes : celles-ci partent du citron, qui se
-   trouve à droite du centre du cadre.
-   La couche de jus est placée *sous* la photo : les gouttes naissent donc cachées
-   derrière la main et n'apparaissent qu'en débordant de sa silhouette, ce qui les
-   fait bien sortir du fruit au lieu de flotter par-dessus. */
-.squeeze-stage { position: relative; display: block; }
-.squeeze-photo { position: relative; z-index: 2; }
-.juice {
-  position: absolute;
-  left: 58%;
-  top: 48%;
-  z-index: 1;
-  width: 0;
-  height: 0;
-  pointer-events: none;
-}
-.juice i {
-  position: absolute;
-  left: 0;
-  top: 0;
-  width: var(--s);
-  height: calc(var(--s) * .78);
-  margin: calc(var(--s) * -.39) 0 0 calc(var(--s) * -.5);
-  border-radius: 50%;
-  background: radial-gradient(circle at 32% 30%, #fffbdc, #f6dc55 68%, #e4bf2e);
-  box-shadow: 0 0 8px rgba(246, 220, 85, .65), inset -1px -2px 4px rgba(190, 150, 0, .25);
-  opacity: 0;
-  /* même durée que la pression : la projection tombe donc toujours sur le serrage */
-  animation: juice-fly 2.6s cubic-bezier(.15, .6, .3, 1) infinite;
-  animation-delay: var(--t);
-}
-
-/* Projection : la goutte jaillit, ralentit, s'étire et s'éteint. `rotate` fixe la
-   direction, `translateX` la distance parcourue — d'où une gerbe radiale. */
-@keyframes juice-fly {
-  0%   { opacity: 0; transform: rotate(var(--a)) translateX(4px) scale(.35); }
-  6%   { opacity: 1; transform: rotate(var(--a)) translateX(calc(var(--d) * .42)) scale(1.05); }
-  16%  { opacity: .95; transform: rotate(var(--a)) translateX(calc(var(--d) * .82)) scale(.9); }
-  27%  { opacity: 0; transform: rotate(var(--a)) translateX(var(--d)) scale(.55); }
-  100% { opacity: 0; transform: rotate(var(--a)) translateX(var(--d)) scale(.55); }
-}
-
-/* Les distances dépassent largement la demi-largeur de la photo (150 px) : sans
-   cela les gouttes resteraient prisonnières de la silhouette de la main. */
-.juice i:nth-child(1)  { --a: -96deg;  --d: 250px; --s: 18px; --t: .40s; }
-.juice i:nth-child(2)  { --a: -62deg;  --d: 215px; --s: 14px; --t: .46s; }
-.juice i:nth-child(3)  { --a: -34deg;  --d: 275px; --s: 21px; --t: .42s; }
-.juice i:nth-child(4)  { --a: -12deg;  --d: 235px; --s: 16px; --t: .52s; }
-.juice i:nth-child(5)  { --a: 14deg;   --d: 290px; --s: 20px; --t: .44s; }
-.juice i:nth-child(6)  { --a: 38deg;   --d: 245px; --s: 15px; --t: .58s; }
-.juice i:nth-child(7)  { --a: 62deg;   --d: 300px; --s: 23px; --t: .43s; }
-.juice i:nth-child(8)  { --a: 86deg;   --d: 260px; --s: 18px; --t: .50s; }
-.juice i:nth-child(9)  { --a: 108deg;  --d: 225px; --s: 14px; --t: .62s; }
-.juice i:nth-child(10) { --a: 132deg;  --d: 282px; --s: 19px; --t: .45s; }
-.juice i:nth-child(11) { --a: 156deg;  --d: 240px; --s: 16px; --t: .55s; }
-.juice i:nth-child(12) { --a: 178deg;  --d: 268px; --s: 17px; --t: .48s; }
-.juice i:nth-child(13) { --a: -158deg; --d: 220px; --s: 13px; --t: .64s; }
-.juice i:nth-child(14) { --a: -132deg; --d: 255px; --s: 16px; --t: .47s; }
-.juice i:nth-child(15) { --a: -118deg; --d: 205px; --s: 12px; --t: .60s; }
-.juice i:nth-child(16) { --a: 100deg;  --d: 320px; --s: 13px; --t: .41s; }
+.overlay:not(.squeezing) .squeeze-photo { display: none; }
 
 /* Le fond de la photo est détouré (alpha), donc plus besoin de `multiply`, qui
    assombrissait au passage tout l'overlay derrière l'image. */
@@ -1313,8 +1269,7 @@ button.active {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .squeeze-photo, .juice i { animation: none; }
-  .juice { display: none; }
+  .squeeze-photo { animation: none; }
 }
 
 .toast {

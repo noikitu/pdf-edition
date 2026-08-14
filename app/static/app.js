@@ -1897,17 +1897,13 @@ function drawLens(node, clientX, clientY) {
         blue = bilinear1(src, spanX, spanY, gx + ux * off - sx, gy + uy * off - sy, 2);
       }
 
-      // Éclairage : seul le rebord est en pente, il est donc le seul assombri.
-      // Le centre, plat, ne doit porter aucun dégradé — c'est ce qui distingue
-      // une loupe posée sur la page d'une bille de verre. L'assombrissement
-      // reste léger : sans ombre portée, c'est la réfraction qui doit signaler
-      // le verre, pas un cerne.
-      const shade = 1 - 0.15 * fringe * fringe;
-      const spec = specular(dx / R, dy / R, r);
-
-      dst[i] = Math.min(255, red * shade + spec);
-      dst[i + 1] = Math.min(255, green * shade + spec);
-      dst[i + 2] = Math.min(255, blue * shade + spec);
+      // Aucun éclairage : ni assombrissement du rebord, ni reflet. Ce sont eux
+      // qui donnaient du volume et faisaient lire un objet en trois dimensions.
+      // La loupe ne fait plus que dévier la lumière — c'est la déformation seule
+      // qui signale le verre.
+      dst[i] = red;
+      dst[i + 1] = green;
+      dst[i + 2] = blue;
       // Le dernier pixel et demi s'estompe : sans cela le disque serait crénelé.
       dst[i + 3] = Math.min(255, (1 - r) * R * 170);
     }
@@ -1953,23 +1949,6 @@ function bilinear1(src, spanX, spanY, x, y, c) {
   const top = src[i00] + (src[i00 + 4] - src[i00]) * tx;
   const bottom = src[i01] + (src[i01 + 4] - src[i01]) * tx;
   return top + (bottom - top) * ty;
-}
-
-/** Reflet : un verre plat ne porte pas de dôme lumineux, seulement un glissement
- *  de lumière sur la tranche biseautée. La tache centrale est donc discrète, et
- *  l'essentiel se joue sur le rebord, du côté de la source. */
-function specular(nx, ny, r) {
-  const dx = nx + 0.36, dy = ny + 0.44;
-  const near = dx * dx + dy * dy;
-  // Voile central presque imperceptible : il ne doit pas laiter le texte.
-  const sheen = Math.max(0, 1 - near * 6) * 12;
-  const edge = r > LENS_FLAT
-    ? Math.max(0, 1 - near * 0.9) * ((r - LENS_FLAT) / (1 - LENS_FLAT)) ** 1.6 * 88
-    : 0;
-  // Fin liseré sur la tranche extérieure : sans ombre portée, c'est lui qui
-  // détache le disque d'un fond blanc, en une poignée de pixels.
-  const lip = r > 0.965 ? ((r - 0.965) / 0.035) ** 2 * 52 : 0;
-  return sheen + edge + lip;
 }
 
 /* Un seul tampon, réutilisé d'une image à l'autre : en allouer un à chaque

@@ -97,7 +97,11 @@ transforme aussi `Ortografe` en `Orthographe`.
 
 ## Assistance par LLM (facultative)
 
-Un modèle peut relire le texte et **proposer** des corrections. Il n'a aucun accès direct
+Un modèle peut relire le texte et **proposer** des corrections, mais aussi le reformuler,
+le raccourcir ou le traduire — le menu « Tâche » propose ces consignes, le champ reste
+libre. La traduction n'est utilisable que depuis que les paragraphes se recomposent : un
+texte traduit change de longueur, et il aurait auparavant été rétréci pour tenir sur sa
+ligne d'origine. Il n'a aucun accès direct
 au PDF : il reçoit des fragments de texte, renvoie des remplacements, et l'application
 passe ensuite par la même route d'édition que le reste de l'app — donc par la pile
 d'annulation. Rien n'est modifié sans que vous ayez coché la proposition.
@@ -155,12 +159,16 @@ Si le texte saisi dépasse la place disponible, le **paragraphe entier est recom
 ses retours à la ligne sont recalculés, et il gagne une ligne s'il y a de la place en
 dessous. À défaut, l'interligne est resserré de 10 % au maximum.
 
+Les styles sont conservés : un mot en gras ou en italique le reste, où qu'il atterrisse
+après recomposition, et un changement de style au milieu d'un mot est respecté.
+
 Recomposer est refusé — et la taille de police est alors réduite, jusqu'à 75 %, comme
 avant — dès que l'opération risquerait de perdre quelque chose :
 
-- **plusieurs styles** dans le paragraphe : un mot en gras serait aplati ;
 - une **césure** en fin de ligne : impossible de savoir si `bien-` + `être` formait un mot
   coupé ou un mot composé ;
+- des **corps très différents** dans un même bloc : ce n'est alors pas un paragraphe mais
+  des éléments de nature distincte réunis par erreur ;
 - des **indices de rupture interne** — interligne élargi, ligne en alinéa, ligne courte en
   plein milieu. Un « bloc » PyMuPDF n'est pas toujours un paragraphe : deux paragraphes
   rapprochés peuvent y être regroupés, et les recomposer ensemble les fondrait en un seul ;

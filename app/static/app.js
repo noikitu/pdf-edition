@@ -1310,6 +1310,20 @@ function currentPage() {
   return best;
 }
 
+/* Les tâches courantes remplissent la consigne, qui reste modifiable : le menu
+   fait gagner du temps sans enfermer dans une liste. */
+$('#assist-preset').addEventListener('change', (e) => {
+  if (e.target.value) assist.instruction.value = e.target.value;
+  assist.instruction.focus();
+  assist.instruction.select();
+});
+
+// Une consigne retouchée à la main ne correspond plus à aucune tâche du menu.
+assist.instruction.addEventListener('input', () => {
+  const preset = $('#assist-preset');
+  if (assist.instruction.value !== preset.value) preset.value = '';
+});
+
 $('#btn-assist-run').addEventListener('click', runAssist);
 assist.instruction.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') { e.preventDefault(); runAssist(); }

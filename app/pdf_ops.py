@@ -9,7 +9,8 @@ possible (voir `fonts.py`).
 
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
+import re
+from dataclasses import dataclass, asdict, replace
 from typing import Iterable
 
 import fitz  # PyMuPDF
@@ -367,30 +368,52 @@ def _write_line(
 
 # Compression maximale de l'interligne avant de renoncer au reflux.
 MIN_LEADING_SQUEEZE = 0.9
+# Au-delà de cet écart de corps dans un même bloc, on n'a pas affaire à un
+# paragraphe mais à des éléments de nature différente réunis par erreur.
+MAX_SIZE_SPREAD = 1.4
+
+
+@dataclass
+class Run:
+    """Portion homogène d'un paragraphe : un style, un morceau de texte.
+
+    `line` et `group` reprennent les index qui composent l'identifiant d'un
+    fragment, ce qui permet de retrouver exactement la portion éditée.
+    """
+
+    text: str
+    fontname: str
+    size: float
+    color: str
+    alias: str
+    line: int
+    group: int
 
 
 @dataclass
 class Paragraph:
-    """Un paragraphe recomposable : lignes homogènes, place connue autour."""
+    """Un paragraphe recomposable : lignes cohérentes, place connue autour."""
 
     page: int
     line_bboxes: list[tuple[float, float, float, float]]
     baselines: list[float]
-    texts: list[str]
+    runs: list[Run]
     first_left: float    # bord gauche de la première ligne (alinéa éventuel)
     left: float          # bord gauche des lignes suivantes
     right: float         # bord droit de la colonne
     leading: float       # interligne mesuré
     room_below: float    # espace vertical libre sous le paragraphe
-    size: float
-    fontname: str
-    alias: str
-    color: str
+    dominant: Run        # style majoritaire, qui sert de référence
 
-    def text_with(self, index: int, replacement: str) -> str:
-        parts = list(self.texts)
-        parts[index] = replacement
-        return " ".join(p for p in parts if p)
+    def runs_with(self, line: int, group: int, replacement: str) -> list[Run]:
+        """Les mêmes portions, celle visée portant le nouveau texte."""
+        out = []
+        for run in self.runs:
+            if run.line == line and run.group == group:
+                out.append(replace(run, text=replacement))
+            else:
+                out.append(run)
+        return out
 
 
 @dataclass
@@ -398,10 +421,9 @@ class ReflowPlan:
     """Recomposition validée d'avance : on ne caviarde qu'une fois sûr d'écrire."""
 
     para: Paragraph
-    lines: list[str]
+    lines: list                # lignes, chacune une liste de segments à écrire
     leading: float
-    font: fitz.Font
-    size: float
+    space: float               # largeur d'une espace, au style dominant
 
 
 def _page_dict(page: fitz.Page) -> dict:
@@ -412,7 +434,12 @@ def _page_dict(page: fitz.Page) -> dict:
 
 
 def paragraph_at(page: fitz.Page, raw: dict, bi: int) -> Paragraph | None:
-    """Décrit le bloc `bi` s'il est recomposable, sinon None."""
+    """Décrit le bloc `bi` s'il est recomposable, sinon None.
+
+    Les styles multiples sont admis : un mot en gras au milieu d'un paragraphe
+    est conservé tel quel à travers la recomposition. Ce sont les ruptures de
+    *structure* qui font renoncer, pas les changements de typographie.
+    """
     blocks = raw.get("blocks", [])
     if not 0 <= bi < len(blocks):
         return None
@@ -423,32 +450,59 @@ def paragraph_at(page: fitz.Page, raw: dict, bi: int) -> Paragraph | None:
     if len(lines) < 2:
         return None
 
-    styles: set[tuple] = set()
+    runs: list[Run] = []
     texts: list[str] = []
     boxes: list[tuple[float, float, float, float]] = []
     baselines: list[float] = []
-    for line in lines:
+
+    for li, line in enumerate(lines):
         if abs(line.get("dir", (1, 0))[1]) > 0.01:
             return None
         spans = [s for s in line.get("spans", []) if s["text"].strip()]
         if not spans:
             return None
+
+        # Regroupement identique à celui de `extract_items` : les index de
+        # groupe doivent désigner les mêmes portions de part et d'autre.
+        groups: list[dict] = []
         for span in spans:
-            styles.add((span["font"], round(span["size"], 2), span["color"]))
-        if len(styles) > 1:
-            return None
-        text = "".join(s["text"] for s in spans).strip()
-        if not text:
-            return None
-        texts.append(text)
+            style = (span["font"], round(span["size"], 2), span["color"])
+            if groups and groups[-1]["style"] == style:
+                groups[-1]["text"] += span["text"]
+            else:
+                groups.append({"style": style, "text": span["text"], "flags": span["flags"]})
+
+        for gi, group in enumerate(groups):
+            fontname, size, color = group["style"]
+            runs.append(Run(
+                text=group["text"],
+                fontname=fontname,
+                size=size,
+                color=_color_hex(color),
+                alias=base14_alias(fontname, group["flags"]),
+                line=li,
+                group=gi,
+            ))
+        texts.append("".join(g["text"] for g in groups).strip())
         boxes.append(tuple(line["bbox"]))
         baselines.append(spans[0]["origin"][1])
 
     if any(t.endswith("-") for t in texts[:-1]):
         return None
 
-    fontname, size, color = next(iter(styles))
-    flags = lines[0]["spans"][0]["flags"]
+    sizes = [r.size for r in runs]
+    if max(sizes) > min(sizes) * MAX_SIZE_SPREAD:
+        return None
+
+    # Style dominant : celui qui porte le plus de caractères. Il donne
+    # l'interligne, la largeur des espaces et le repli en cas de doute.
+    weight: dict[tuple, int] = {}
+    for run in runs:
+        key = (run.fontname, run.size, run.color, run.alias)
+        weight[key] = weight.get(key, 0) + len(run.text)
+    top = max(weight, key=weight.get)
+    dominant = next(r for r in runs
+                    if (r.fontname, r.size, r.color, r.alias) == top)
 
     # La dernière ligne d'un paragraphe est courte : elle sous-estimerait la
     # largeur de la colonne, on la retire du calcul du bord droit.
@@ -458,7 +512,7 @@ def paragraph_at(page: fitz.Page, raw: dict, bi: int) -> Paragraph | None:
 
     gaps = [b - a for a, b in zip(baselines, baselines[1:])]
     gaps = [g for g in gaps if g > 0]
-    leading = sorted(gaps)[len(gaps) // 2] if gaps else size * 1.18
+    leading = sorted(gaps)[len(gaps) // 2] if gaps else dominant.size * 1.18
 
     # Un « bloc » PyMuPDF n'est pas toujours un paragraphe : deux paragraphes
     # rapprochés peuvent y être regroupés. Les recomposer ensemble les fondrait
@@ -480,16 +534,13 @@ def paragraph_at(page: fitz.Page, raw: dict, bi: int) -> Paragraph | None:
         page=page.number,
         line_bboxes=boxes,
         baselines=baselines,
-        texts=texts,
+        runs=runs,
         first_left=boxes[0][0],
         left=body_left,
         right=right,
         leading=leading,
         room_below=_room_below(page, blocks, rect),
-        size=size,
-        fontname=fontname,
-        alias=base14_alias(fontname, flags),
-        color=_color_hex(color),
+        dominant=dominant,
     )
 
 
@@ -510,24 +561,65 @@ def _room_below(page: fitz.Page, blocks: list[dict], rect: fitz.Rect) -> float:
     return max(0.0, limit - rect.y1)
 
 
-def _wrap(text: str, font: fitz.Font, size: float, first_width: float, width: float):
-    """Découpe `text` en lignes tenant dans la colonne. None si un mot est trop long."""
-    words = text.split()
-    if not words:
-        return []
-    lines: list[str] = []
-    current = ""
-    for word in words:
+def _tokenize(runs: list[Run], styles: dict) -> list[list[dict]]:
+    """Découpe le paragraphe en mots, chacun pouvant mêler plusieurs styles.
+
+    Un changement de style tombe rarement sur une frontière de mot — « ortho »
+    en romain suivi de « graphe » en gras forme un seul mot. Un mot est donc une
+    liste de segments, et non une chaîne.
+    """
+    tokens: list[list[dict]] = []
+    current: list[dict] = []
+    last_line = runs[0].line if runs else 0
+
+    for run in runs:
+        # Les lignes d'origine sont recollées par une espace : sans elle, le
+        # dernier mot d'une ligne se souderait au premier de la suivante.
+        if run.line != last_line:
+            if current:
+                tokens.append(current)
+                current = []
+            last_line = run.line
+        style = styles[(run.fontname, run.size, run.color, run.alias)]
+        for piece in re.split(r"(\s+)", run.text):
+            if not piece:
+                continue
+            if piece.isspace():
+                if current:
+                    tokens.append(current)
+                    current = []
+                continue
+            width = style["font"].text_length(piece, fontsize=run.size)
+            current.append({"text": piece, "style": style, "size": run.size,
+                            "color": run.color, "width": width})
+    if current:
+        tokens.append(current)
+    return tokens
+
+
+def _token_width(token: list[dict]) -> float:
+    return sum(seg["width"] for seg in token)
+
+
+def _wrap_tokens(tokens, space, first_width, width):
+    """Répartit les mots en lignes. None si un mot excède la colonne à lui seul."""
+    lines: list[list] = []
+    current: list = []
+    used = 0.0
+    for token in tokens:
+        w = _token_width(token)
         limit = first_width if not lines else width
-        trial = f"{current} {word}" if current else word
-        if current and font.text_length(trial, fontsize=size) > limit:
-            lines.append(current)
-            current = word
-        else:
-            current = trial
-        if font.text_length(current, fontsize=size) > (first_width if not lines else width):
+        if w > limit:
             return None
-    lines.append(current)
+        if current and used + space + w > limit:
+            lines.append(current)
+            current = [token]
+            used = w
+        else:
+            used = used + space + w if current else w
+            current.append(token)
+    if current:
+        lines.append(current)
     return lines
 
 
@@ -540,23 +632,41 @@ def plan_reflow(
     paragraphe pour découvrir ensuite qu'il ne se recompose pas, ses autres
     lignes seraient perdues.
     """
+    parts = item.id.split("-")
+    if len(parts) < 4:
+        return None
     try:
-        bi = int(item.id.split("-")[1])
-    except (IndexError, ValueError):
+        bi, li, gi = int(parts[1]), int(parts[2]), int(parts[3])
+    except ValueError:
         return None
     para = paragraph_at(page, raw, bi)
     if para is None:
         return None
-    try:
-        li = int(item.id.split("-")[2])
-    except (IndexError, ValueError):
-        return None
-    if not 0 <= li < len(para.texts):
+    if not any(r.line == li and r.group == gi for r in para.runs):
         return None
 
-    full = para.text_with(li, text.replace("\n", " ").strip())
-    font, _ = resolver.resolve(page.number, para.fontname, para.alias, full)
-    lines = _wrap(full, font, para.size, para.right - para.first_left, para.right - para.left)
+    runs = para.runs_with(li, gi, text.replace("\n", " ").strip())
+    runs = [r for r in runs if r.text.strip()]
+    if not runs:
+        return None
+
+    # Une police par style présent, résolue une seule fois.
+    styles: dict = {}
+    for run in runs:
+        key = (run.fontname, run.size, run.color, run.alias)
+        if key not in styles:
+            font, _ = resolver.resolve(page.number, run.fontname, run.alias, run.text)
+            styles[key] = {"font": font}
+
+    tokens = _tokenize(runs, styles)
+    if not tokens:
+        return None
+    dom = styles[(para.dominant.fontname, para.dominant.size,
+                  para.dominant.color, para.dominant.alias)]
+    space = dom["font"].text_length(" ", fontsize=para.dominant.size)
+
+    lines = _wrap_tokens(tokens, space,
+                         para.right - para.first_left, para.right - para.left)
     if not lines:
         return None
 
@@ -569,18 +679,26 @@ def plan_reflow(
         if squeezed < leading * MIN_LEADING_SQUEEZE:
             return None
         leading = squeezed
-    return ReflowPlan(para=para, lines=lines, leading=leading, font=font, size=para.size)
+    return ReflowPlan(para=para, lines=lines, leading=leading, space=space)
 
 
 def run_reflow(page: fitz.Page, plan: ReflowPlan) -> None:
-    """Écrit les lignes recomposées. Le caviardage a déjà eu lieu."""
+    """Écrit les lignes recomposées. Le caviardage a déjà eu lieu.
+
+    Chaque segment est posé à sa propre abscisse, avec sa police, son corps et sa
+    couleur : c'est ce qui permet à un mot en gras de le rester.
+    """
     para = plan.para
     y = para.baselines[0]
     for index, line in enumerate(plan.lines):
         x = para.first_left if index == 0 else para.left
-        _write_line(page, fitz.Point(x, y), line, plan.font, plan.size, para.color)
+        for token in line:
+            for seg in token:
+                _write_line(page, fitz.Point(x, y), seg["text"],
+                            seg["style"]["font"], seg["size"], seg["color"])
+                x += seg["width"]
+            x += plan.space
         y += plan.leading
-
 
 def resolve_edits(
     doc: fitz.Document, requests: list[dict]

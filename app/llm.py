@@ -82,7 +82,8 @@ class Suggestions(BaseModel):
     )
 
 
-SYSTEM_PROMPT = """Tu corriges le texte d'un document PDF.
+SYSTEM_PROMPT = """Tu retravailles le texte d'un document PDF : correction,
+reformulation ou traduction, selon ce que demande l'utilisateur.
 
 On te donne des fragments numérotés, chacun avec un identifiant. Tu renvoies la
 liste des seuls fragments à modifier, avec leur nouveau texte complet.
@@ -91,13 +92,16 @@ Règles impératives :
 - Reprends l'identifiant exactement tel qu'il t'est donné.
 - Renvoie le texte complet du fragment, pas seulement la partie changée.
 - Ne renvoie pas les fragments que tu ne modifies pas.
-- Reste dans la langue du document.
+- Suis la consigne de l'utilisateur. Sans indication contraire, garde la langue
+  du document ; s'il demande une traduction, traduis.
 - Pas de Markdown, pas de guillemets ajoutés, pas de saut de ligne : ces
   fragments sont écrits tels quels dans la page.
-- Garde une longueur proche de l'original. Un fragment beaucoup plus long
-  débordera sur le texte voisin.
+- L'application recompose les paragraphes : un texte plus long est admis et les
+  retours à la ligne seront recalculés. Reste néanmoins dans un ordre de
+  grandeur voisin — un fragment isolé, qu'aucun paragraphe n'entoure, sera
+  réduit pour tenir sur sa ligne.
 - N'invente aucune information absente du document.
-- Si rien n'est à corriger, renvoie une liste vide.
+- Si rien n'est à changer, renvoie une liste vide.
 
 Un fragment est une portion de ligne : il peut commencer ou finir au milieu
 d'une phrase, et la ponctuation manquante peut se trouver dans le fragment

@@ -1747,13 +1747,17 @@ function setLens(on) {
   el.lensBtn.classList.toggle('active', on);
   el.viewer.classList.toggle('lens-on', on);
   el.lens.hidden = true;                // réapparaît au premier mouvement sur une page
+  lensTarget.ready = false;             // la prochaine ouverture ne glissera pas depuis l'ancienne position
   if (on) toast('Loupe : molette pour régler le grossissement, Échap pour quitter');
 }
 
-/* La souris émet bien plus d'événements qu'il n'y a d'images à l'écran. Le rendu
-   étant calculé au pixel, on ne le fait qu'une fois par image, sur la dernière
-   position connue. */
-let lensPending = null;
+/* La loupe rejoint le curseur au lieu de lui coller : à chaque image elle en
+   parcourt 15 % de la distance restante, comme le `lerp` de la référence. Ce
+   retard est ce qui fait sentir la masse du verre — sans lui, le disque paraît
+   collé au pointeur. Le rendu étant calculé au pixel, il n'a lieu qu'une fois
+   par image, jamais à chaque événement souris. */
+const lensTarget = { x: 0, y: 0, node: null, ready: false };
+let lensAt = { x: 0, y: 0 };
 let lensFrame = 0;
 
 el.viewer.addEventListener('mousemove', (e) => {
@@ -1761,14 +1765,25 @@ el.viewer.addEventListener('mousemove', (e) => {
   // Pendant la saisie d'un fragment, la loupe masquerait le texte en train
   // d'être tapé : on la retire le temps de l'édition.
   const node = state.editing ? null : e.target.closest('.page');
-  if (!node) { lensPending = null; el.lens.hidden = true; return; }
-  lensPending = { node, x: e.clientX, y: e.clientY };
-  if (lensFrame) return;
-  lensFrame = requestAnimationFrame(() => {
-    lensFrame = 0;
-    if (lensPending && state.lens) drawLens(lensPending.node, lensPending.x, lensPending.y);
-  });
+  if (!node) { lensTarget.node = null; el.lens.hidden = true; return; }
+  if (!lensTarget.ready) { lensAt = { x: e.clientX, y: e.clientY }; lensTarget.ready = true; }
+  lensTarget.x = e.clientX;
+  lensTarget.y = e.clientY;
+  lensTarget.node = node;
+  if (!lensFrame) lensFrame = requestAnimationFrame(lensStep);
 });
+
+function lensStep() {
+  lensFrame = 0;
+  if (!state.lens || !lensTarget.node) return;
+  const dx = lensTarget.x - lensAt.x;
+  const dy = lensTarget.y - lensAt.y;
+  lensAt.x += dx * LENS_LERP;
+  lensAt.y += dy * LENS_LERP;
+  drawLens(lensTarget.node, lensAt.x, lensAt.y);
+  // Tant que le disque n'a pas rattrapé le curseur, on continue d'animer.
+  if (Math.abs(dx) > 0.3 || Math.abs(dy) > 0.3) lensFrame = requestAnimationFrame(lensStep);
+}
 
 el.viewer.addEventListener('mouseleave', () => { el.lens.hidden = true; });
 
@@ -1783,52 +1798,35 @@ el.viewer.addEventListener('wheel', (e) => {
   drawLens(node, e.clientX, e.clientY);
 }, { passive: false });
 
-/* Profil de la lentille. Une loupe n'est pas une bille de verre : son disque est
-   plat sur la plus grande partie de sa surface — grossissement rigoureusement
-   constant, image non déformée — et ne réfracte que dans la bande étroite du
-   rebord, là où le verre s'amincit.
-   LENS_FLAT est la part plate du rayon, LENS_RIM l'ampleur de la réfraction
-   au-delà. */
-const LENS_FLAT = 0.82;
-const LENS_RIM = 0.55;
-/* Écart de déviation entre le rouge et le bleu — le verre disperse le spectre.
-   En pixels de la page, et volontairement sous le pixel : au-delà, ce n'est plus
-   une frange mais deux images décalées. */
-const LENS_FRINGE = 0.9;
+/* Réglages repris du shader `glass-lens-sksl.ts` de ouzhou/react-canvas, en
+   proportions du rayon plutôt qu'en pixels : sa lentille fait 100 px de rayon, la
+   nôtre davantage, et ce sont les rapports qui font l'apparence.
 
-/* Table de correspondance rayon affiché → rayon échantillonné, en fractions du
-   rayon du disque. Elle ne dépend que du grossissement, on la recalcule donc
-   seulement à la molette et non à chaque mouvement de souris. */
-let lensMap = null;
-let lensMapKey = '';
+   Le principe de ce shader : grossissement uniforme sur tout le disque — donc un
+   centre parfaitement plat — et toute la réfraction concentrée dans les 20 %
+   extérieurs, où le point échantillonné est repoussé vers le dehors. */
+const LENS_RIM_START = 0.8;     // début de la bande réfractée (smoothstep 0,8 → 1)
+const LENS_RIM_POW = 1.25;      // durcit la montée de la réfraction
+const LENS_PUSH = 0.28;         // poussée radiale au rebord, en fraction du rayon
+const LENS_CHROMA = 0.02;       // écart entre canaux : rouge poussé plus loin que bleu
+const LENS_BARREL = 0.28;       // bombement, rapporté à la taille de la fenêtre
+const LENS_WOBBLE = 0.0015;     // ondulation du rebord : c'est elle qui fait « liquide »
+const LENS_BORDER = 0.04;       // largeur du liséré clair, en fraction du rayon
+const LENS_BORDER_LIGHT = 36;   // +0,14 sur 255, comme dans le shader
+const LENS_EDGE_SOFT = 0.018;   // adoucissement du contour
+const LENS_LERP = 0.15;         // la loupe rejoint le curseur, elle ne lui colle pas
 
-function lensMapping(f) {
-  const key = String(f);
-  if (lensMapKey === key) return lensMap;
-  const N = 1024;
-  const table = new Float32Array(N + 1);
-  for (let i = 0; i <= N; i++) {
-    const r = i / N;
-    // Jusqu'à LENS_FLAT, la correspondance est strictement proportionnelle :
-    // le grossissement y vaut exactement f, sans la moindre courbure. Au-delà,
-    // un terme quadratique s'ajoute — nul et de pente nulle en LENS_FLAT, donc
-    // sans cassure visible — et va chercher l'image de plus en plus loin, ce qui
-    // la comprime contre le bord.
-    const u = r > LENS_FLAT ? (r - LENS_FLAT) / (1 - LENS_FLAT) : 0;
-    table[i] = (r + LENS_RIM * u * u) / f;
-  }
-  lensMap = table;
-  lensMapKey = key;
-  return table;
-}
+const smoothstep = (e0, e1, x) => {
+  let t = (x - e0) / (e1 - e0);
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  return t * t * (3 - 2 * t);
+};
 
 /** Rend la loupe : chaque pixel du disque va chercher le sien dans la page.
  *
- *  Trois effets naissent de cette seule boucle, là où le CSS ne pouvait que les
- *  imiter : la courbure — le bord échantillonne plus loin, donc comprime — la
- *  dispersion — le rouge et le bleu ne sont pas déviés pareil, d'où une frange
- *  d'un pixel au rebord et non deux anneaux colorés — et le relief, par un
- *  éclairage calculé sur la pente de la surface.
+ *  Porté du shader SkSL de ouzhou/react-canvas. Le calcul se fait en pixels
+ *  d'écran — et non en pixels du canvas — pour que les constantes gardent le
+ *  sens qu'elles ont dans l'original, quel que soit le rapport de pixels.
  */
 function drawLens(node, clientX, clientY) {
   const source = lensSource(node);
@@ -1839,22 +1837,25 @@ function drawLens(node, clientX, clientY) {
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   const size = Math.round(LENS_SIZE * dpr);
   const R = size / 2;
+  const Rs = LENS_SIZE / 2;                       // rayon en pixels d'écran
   const canvas = el.lens;
   if (canvas.width !== size) {
     canvas.width = canvas.height = size;
     canvas.style.width = canvas.style.height = `${LENS_SIZE}px`;
   }
 
-  // Pixels de l'image source par pixel de canvas.
-  const perPixel = (source.w / rect.width) / dpr;
-  const cx = (clientX - rect.left) * (source.w / rect.width);
-  const cy = (clientY - rect.top) * (source.h / rect.height);
+  const zoom = state.lensZoom;
+  const imgPerScreen = source.w / rect.width;     // pixels de la page par pixel d'écran
+  const cx = (clientX - rect.left) * imgPerScreen;
+  const cy = (clientY - rect.top) * imgPerScreen;
 
-  const table = lensMapping(state.lensZoom);
-  // Rayon de la zone lue dans la page, marge comprise pour la dispersion.
-  const reach = Math.ceil(table[1024] * R * perPixel * (1 + LENS_FRINGE)) + 2;
-  // La zone est bornée à l'image : au bord d'une page, demander au-delà rendrait
-  // des pixels transparents que la loupe afficherait en noir.
+  // Le shader rapporte le bombement et l'ondulation à la taille de la scène.
+  const resX = window.innerWidth || 1200;
+  const resY = window.innerHeight || 800;
+
+  // Portée maximale : rayon vu, poussée du rebord, ondulation et marge.
+  const reachScreen = Rs / zoom + Rs * (LENS_PUSH + LENS_CHROMA) + LENS_WOBBLE * resX + 2;
+  const reach = Math.ceil(reachScreen * imgPerScreen) + 2;
   const sx = Math.max(0, Math.round(cx) - reach);
   const sy = Math.max(0, Math.round(cy) - reach);
   const spanX = Math.min(source.w, Math.round(cx) + reach) - sx;
@@ -1864,54 +1865,79 @@ function drawLens(node, clientX, clientY) {
 
   const out = lensBuffer(size);
   const dst = out.data;
+  const softness = LENS_EDGE_SOFT * Rs;
+  const border = LENS_BORDER * Rs;
 
   for (let y = 0; y < size; y++) {
-    const dy = y - R + 0.5;
+    const dys = (y - R + 0.5) / dpr;
     for (let x = 0; x < size; x++) {
-      const dx = x - R + 0.5;
-      const dist = Math.sqrt(dx * dx + dy * dy);
+      const dxs = (x - R + 0.5) / dpr;
+      const dist = Math.sqrt(dxs * dxs + dys * dys);
       const i = (y * size + x) * 4;
-      const r = dist / R;
-      if (r >= 1) { dst[i + 3] = 0; continue; }
 
-      const t = table[(r * 1024) | 0];
-      const ux = dist > 0.0001 ? dx / dist : 0;
-      const uy = dist > 0.0001 ? dy / dist : 0;
-      const base = t * R * perPixel;
-      const gx = cx + ux * base, gy = cy + uy * base;
+      // Contour adouci sur 1,8 px, comme `edgeSoftness` dans le shader.
+      const mask = smoothstep(softness, -softness, dist - Rs);
+      if (mask <= 0) { dst[i + 3] = 0; continue; }
 
-      // Échantillonnage bilinéaire, non négociable ici : au centre la loupe
-      // agrandit au-delà de la résolution de la page — le plus proche voisin
-      // donnerait des marches d'escalier — et au bord elle réduit, ce qui
-      // produirait du crénelage.
-      bilinear3(src, spanX, spanY, gx - sx, gy - sy, rgb);
-      let red = rgb[0], green = rgb[1], blue = rgb[2];
+      const t = dist / Rs;
+      const rim = smoothstep(LENS_RIM_START, 1, t);
+      const warp = Math.pow(rim, LENS_RIM_POW);
 
-      // Dispersion : le verre dévie le bleu plus que le rouge. L'écart est
-      // maintenu sous le pixel et confiné au rebord — au-delà, ce n'est plus une
-      // frange mais du bruit coloré sur tout le texte.
-      const fringe = r > LENS_FLAT ? (r - LENS_FLAT) / (1 - LENS_FLAT) : 0;
-      if (fringe > 0.01) {
-        const off = fringe * fringe * LENS_FRINGE;
-        red = bilinear1(src, spanX, spanY, gx - ux * off - sx, gy - uy * off - sy, 0);
-        blue = bilinear1(src, spanX, spanY, gx + ux * off - sx, gy + uy * off - sy, 2);
+      // Grossissement uniforme : le centre n'est pas déformé.
+      let qx = dxs / zoom, qy = dys / zoom;
+
+      // Bombement, calculé comme dans l'original par rapport à la fenêtre — d'où
+      // sa très faible amplitude, de l'ordre du pour mille.
+      const r2 = (qx / resX) * (qx / resX) + (qy / resY) * (qy / resY);
+      const barrel = 1 + LENS_BARREL * r2 * warp;
+      qx *= barrel;
+      qy *= barrel;
+
+      // Ondulation : une irrégularité du rebord, qui empêche le cercle de
+      // paraître parfaitement géométrique. C'est le « liquide » de liquid glass.
+      if (warp > 0.001) {
+        const px = clientX + dxs, py = clientY + dys;
+        qx += Math.sin(0.02 * px + 0.03 * py) * LENS_WOBBLE * resX * warp;
+        qy += Math.cos(0.021 * px - 0.017 * py) * LENS_WOBBLE * resY * warp;
       }
 
-      // Aucun éclairage : ni assombrissement du rebord, ni reflet. Ce sont eux
-      // qui donnaient du volume et faisaient lire un objet en trois dimensions.
-      // La loupe ne fait plus que dévier la lumière — c'est la déformation seule
-      // qui signale le verre.
-      dst[i] = red;
-      dst[i + 1] = green;
-      dst[i + 2] = blue;
-      // Le dernier pixel et demi s'estompe : sans cela le disque serait crénelé.
-      dst[i + 3] = Math.min(255, (1 - r) * R * 170);
+      // Poussée radiale du rebord, légèrement différente par canal : c'est à la
+      // fois la réfraction et la dispersion, comme dans le shader.
+      const ux = dist > 0.0001 ? dxs / dist : 0;
+      const uy = dist > 0.0001 ? dys / dist : 0;
+      const push = LENS_PUSH * Rs * warp;
+      const step = LENS_CHROMA * Rs * warp;
+
+      const gx = (cx + (qx + ux * (push - step)) * imgPerScreen) - sx;
+      const gy = (cy + (qy + uy * (push - step)) * imgPerScreen) - sy;
+      bilinear3(src, spanX, spanY, gx, gy, rgb);
+      let red = rgb[0], green = rgb[1], blue = rgb[2];
+
+      if (warp > 0.001) {
+        const dR = push;
+        const dB = push - step * 2;
+        red = bilinear1(src, spanX, spanY,
+          cx + (qx + ux * dR) * imgPerScreen - sx,
+          cy + (qy + uy * dR) * imgPerScreen - sy, 0);
+        blue = bilinear1(src, spanX, spanY,
+          cx + (qx + ux * dB) * imgPerScreen - sx,
+          cy + (qy + uy * dB) * imgPerScreen - sy, 2);
+      }
+
+      // Liséré clair centré sur le contour : plat, sans dégradé — il détache le
+      // disque sans lui donner de volume.
+      const lip = smoothstep(border, 0, Math.abs(dist - Rs)) * LENS_BORDER_LIGHT;
+
+      dst[i] = Math.min(255, red + lip);
+      dst[i + 1] = Math.min(255, green + lip);
+      dst[i + 2] = Math.min(255, blue + lip);
+      dst[i + 3] = Math.round(mask * 255);
     }
   }
 
-  const half = LENS_SIZE / 2;
   el.lens.hidden = false;
-  el.lens.style.transform = `translate3d(${clientX - half}px, ${clientY - half}px, 0)`;
+  el.lens.style.transform =
+    `translate3d(${clientX - LENS_SIZE / 2}px, ${clientY - LENS_SIZE / 2}px, 0)`;
   lensCtx(canvas).putImageData(out.image, 0, 0);
 }
 

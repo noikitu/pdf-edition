@@ -436,27 +436,6 @@ button.active {
 .assist-actions button { font-size: 12px; padding: 8px 11px; }
 #assist-count { font-size: 12px; color: var(--muted); }
 
-#assist-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-#assist-list li {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 9px 11px;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, .6);
-  border: 1px solid rgba(255, 255, 255, .85);
-}
-#assist-list .texts { flex: 1; display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
-#assist-list .page-ref {
-  font: 400 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: var(--muted-soft);
-}
-#assist-list del { color: #a3231a; text-decoration-thickness: 1px; }
-#assist-list ins { color: var(--green); text-decoration: none; }
-#assist-list .why { font-size: 12px; color: var(--muted-soft); font-style: normal; }
-#assist-list .goto { padding: 5px 8px; font-size: 12px; }
-#assist-list .pick { padding-top: 2px; }
-
 /* ------------------------------------------------------------ menu latéral */
 
 /* Le panneau coulisse hors du cadre plutôt que de disparaître : c'est ce qui
@@ -863,7 +842,16 @@ button.active {
 
 /* ---------------------------------------------------------------- pages PDF */
 
-.viewer { padding: 36px 16px 60px; display: flex; flex-direction: column; align-items: center; gap: 24px; }
+/* `position: relative` fait du visualiseur le repère des boutons de proposition,
+   posés dans sa marge — la page, elle, découpe ce qui déborde d'elle. */
+.viewer {
+  position: relative;
+  padding: 36px 16px 60px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+}
 
 .page {
   position: relative;
@@ -1047,6 +1035,65 @@ button.active {
 }
 .page-tools button:hover:not(:disabled) { background: #fff; }
 .page-tools .danger { color: #a3231a; }
+
+/* ------------------------------------------- propositions de l'assistant */
+
+/* Le texte proposé, posé sur celui qu'il remplace, dans la même typographie.
+   Le bleu le distingue du jaune de la recherche et du surlignage. */
+.sugg {
+  position: absolute;
+  z-index: 6;
+  white-space: pre;
+  border-radius: 3px;
+  padding: 0 3px;
+  margin: 0 -3px;
+  color: #10336f;
+  background: rgba(74, 144, 255, .2);
+  box-shadow: inset 0 0 0 1px rgba(56, 124, 235, .55);
+  cursor: default;
+  transition: background .12s, box-shadow .12s;
+}
+.sugg.aimed {
+  background: rgba(74, 144, 255, .34);
+  box-shadow: inset 0 0 0 1px rgba(56, 124, 235, .9), 0 3px 10px rgba(56, 124, 235, .3);
+}
+.sugg.busy { opacity: .45; }
+
+.sugg-tools {
+  position: absolute;
+  z-index: 20;
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 9px;
+  transform: translateY(-5px);
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: var(--glass-border);
+  box-shadow: var(--glass-shadow);
+}
+.sugg-tools button {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  border-radius: 7px;
+  border: none;
+  box-shadow: none;
+  background: rgba(255, 255, 255, .8);
+}
+.sugg-tools .yes { color: var(--green); }
+.sugg-tools .no { color: #a3231a; }
+.sugg-tools button:hover:not(:disabled) { background: #fff; }
+
+/* Sous cette largeur, la marge du visualiseur ne peut plus loger les boutons :
+   ils passent au-dessus du bord gauche de la page. */
+@media (max-width: 900px) {
+  .sugg-tools { transform: translate(60px, -32px); }
+}
 
 /* occurrence de recherche mise en évidence le temps d'un saut */
 .find-hit {

@@ -27,6 +27,7 @@ const state = {
   lens: false,     // loupe active
   lensZoom: 2.5,   // facteur de grossissement, réglable à la molette
   scanPages: [],   // pages sans texte extractible
+  suggestions: [], // propositions du modele, posees sur la page
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -400,6 +401,7 @@ function sizePages() {
     node.style.height = `${page.height * state.zoom}px`;
     if (node._items) drawLayer(node, node._items);
   });
+  if (state.suggestions.length) paintSuggestions();
 }
 
 async function loadPage(node) {
@@ -738,6 +740,7 @@ async function pageOperation(label, request) {
     const data = await request();
     applyState(data);
     resetSearch();
+    dropSuggestions();
     buildPages();
     buildThumbs();
     checkScan();
@@ -1194,9 +1197,7 @@ const assist = {
   panel: $('#assist-panel'),
   info: $('#assist-info'),
   results: $('#assist-results'),
-  list: $('#assist-list'),
   count: $('#assist-count'),
-  apply: $('#btn-assist-apply'),
   remember: $('#assist-remember'),
   keyNote: $('#assist-key-note'),
   keyState: $('#key-state'),
@@ -1363,87 +1364,178 @@ async function runAssist() {
   }
 }
 
+/* Les propositions du modèle ne sont plus listées à part : elles se posent sur la
+   page, à l'endroit exact qu'elles modifient, en bleu, avec un couple de boutons
+   dans la marge. On juge ainsi une correction dans son contexte typographique —
+   longueur réelle, voisinage, mise en page — ce qu'une liste ne montre pas. */
 function renderSuggestions(data) {
-  const found = data.suggestions || [];
+  const found = (data.suggestions || []).map((s) => ({ ...s }));
+  state.suggestions = found;
   const examined = `${data.examined} fragment(s) examiné(s)`;
-  assist.info.textContent = found.length
-    ? `${found.length} proposition(s) — ${examined}`
-    : `Aucune correction proposée — ${examined}`;
+
   if (data.truncated) {
     // Mieux vaut le dire que laisser croire que tout a été relu.
     toast('Document trop long : seul le début a été analysé. Relancez page par page.', true);
   }
-  if (!found.length) { assist.results.hidden = true; return; }
-
-  assist.list.innerHTML = '';
-  found.forEach((s, i) => {
-    const li = document.createElement('li');
-    li.innerHTML = `
-      <label class="pick"><input type="checkbox" checked></label>
-      <div class="texts">
-        <span class="page-ref">p. ${s.page + 1}</span>
-        <del></del>
-        <ins></ins>
-        <em class="why"></em>
-      </div>
-      <button class="goto" title="Voir dans la page">↗</button>`;
-    li.querySelector('del').textContent = s.original;
-    li.querySelector('ins').textContent = s.text;
-    li.querySelector('.why').textContent = s.reason;
-    li.querySelector('input').addEventListener('change', updateAssistCount);
-    li.querySelector('.goto').addEventListener('click', () => {
-      const node = pageNode(s.page);
-      if (node) node.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    });
-    li._suggestion = s;
-    li.dataset.index = String(i);
-    assist.list.appendChild(li);
-  });
+  if (!found.length) {
+    assist.info.textContent = `Aucune proposition — ${examined}`;
+    assist.results.hidden = true;
+    clearSuggestions();
+    return;
+  }
+  assist.info.textContent = `${found.length} proposition(s) — ${examined}`;
   assist.results.hidden = false;
   updateAssistCount();
+  showSuggestions(true);
 }
 
-const pickedSuggestions = () =>
-  [...assist.list.querySelectorAll('li')].filter((li) => li.querySelector('input').checked);
+/** Affiche les propositions en place. `focusFirst` amène à la première. */
+async function showSuggestions(focusFirst) {
+  // Les pages concernées doivent être rendues pour qu'on connaisse la position
+  // des fragments visés.
+  const pages = [...new Set(state.suggestions.map((s) => s.page))];
+  await Promise.all(pages.map((pno) => {
+    const node = pageNode(pno);
+    return node ? loadPage(node) : null;
+  }));
+  paintSuggestions();
+  if (focusFirst && state.suggestions.length) {
+    const mark = el.viewer.querySelector('.sugg');
+    if (mark) mark.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+}
+
+/** Abandonne les propositions en cours : la page a change sous elles. */
+function dropSuggestions() {
+  state.suggestions = [];
+  clearSuggestions();
+  assist.results.hidden = true;
+}
+
+function clearSuggestions() {
+  el.viewer.querySelectorAll('.sugg, .sugg-tools').forEach((n) => n.remove());
+}
+
+/** Retrouve le fragment visé par une proposition.
+ *
+ *  Les identifiants sont positionnels : accepter une correction décale ceux qui
+ *  suivent sur la même page. On repasse donc par le texte d'origine, exactement
+ *  comme le fait le serveur avant d'écrire.
+ */
+function locateItem(node, suggestion) {
+  const items = node._items || [];
+  const byId = items.find((i) => i.id === suggestion.id);
+  if (byId && byId.text === suggestion.original) return byId;
+  const twins = items.filter((i) => i.text === suggestion.original);
+  return twins.length === 1 ? twins[0] : null;
+}
+
+function paintSuggestions() {
+  clearSuggestions();
+  const z = state.zoom;
+
+  state.suggestions.forEach((s) => {
+    const node = pageNode(s.page);
+    const item = node ? locateItem(node, s) : null;
+    s.lost = !item;
+    if (!item) return;
+
+    const [x0, y0, x1, y1] = item.bbox;
+    const height = Math.max(y1 - y0, item.size);
+
+    // Le texte proposé se substitue visuellement à l'ancien, dans la même
+    // typographie : c'est le résultat qu'on juge, pas une description.
+    const mark = document.createElement('div');
+    mark.className = 'sugg';
+    mark.textContent = s.text;
+    mark.title = `Avant : ${s.original}${s.reason ? `\n${s.reason}` : ''}`;
+    mark.style.left = `${x0 * z}px`;
+    mark.style.top = `${y0 * z}px`;
+    mark.style.minWidth = `${(x1 - x0) * z}px`;
+    mark.style.height = `${height * z}px`;
+    mark.style.lineHeight = `${height * z}px`;
+    mark.style.fontSize = `${item.size * z}px`;
+    mark.style.fontFamily = fontStack(item.font);
+    mark.style.fontWeight = item.bold ? '700' : '400';
+    mark.style.fontStyle = item.italic ? 'italic' : 'normal';
+    node.querySelector('.layer').appendChild(mark);
+    s.mark = mark;
+
+    // Les boutons vivent dans la marge du visualiseur, hors de la page : celle-ci
+    // découpe ce qui déborde, et les poser à l'intérieur les ferait chevaucher
+    // le texte des documents à faible marge.
+    const tools = document.createElement('div');
+    tools.className = 'sugg-tools';
+    tools.style.left = `${node.offsetLeft - 72}px`;
+    tools.style.top = `${node.offsetTop + y0 * z}px`;
+    tools.innerHTML =
+      '<button class="yes" title="Accepter">✓</button>' +
+      '<button class="no" title="Refuser">✕</button>';
+    tools.querySelector('.yes').addEventListener('click', () => acceptSuggestions([s]));
+    tools.querySelector('.no').addEventListener('click', () => rejectSuggestions([s]));
+    // Survoler un bouton met en évidence la correction correspondante.
+    tools.addEventListener('mouseenter', () => mark.classList.add('aimed'));
+    tools.addEventListener('mouseleave', () => mark.classList.remove('aimed'));
+    el.viewer.appendChild(tools);
+  });
+
+  updateAssistCount();
+}
 
 function updateAssistCount() {
-  const picked = pickedSuggestions().length;
-  assist.count.textContent = `${picked} sélectionnée(s)`;
-  assist.apply.disabled = picked === 0;
+  const total = state.suggestions.length;
+  const lost = state.suggestions.filter((s) => s.lost).length;
+  assist.count.textContent = lost
+    ? `${total} proposition(s), dont ${lost} introuvable(s)`
+    : `${total} proposition(s)`;
+  assist.results.hidden = total === 0;
 }
 
-const setAllPicks = (checked) => {
-  assist.list.querySelectorAll('input').forEach((box) => { box.checked = checked; });
-  updateAssistCount();
-};
-$('#btn-assist-all').addEventListener('click', () => setAllPicks(true));
-$('#btn-assist-none').addEventListener('click', () => setAllPicks(false));
+function rejectSuggestions(list) {
+  const dropped = new Set(list);
+  state.suggestions = state.suggestions.filter((s) => !dropped.has(s));
+  paintSuggestions();
+  if (!state.suggestions.length) {
+    assist.info.textContent = 'Propositions refusées';
+    clearSuggestions();
+  }
+}
 
-assist.apply.addEventListener('click', async () => {
-  const picked = pickedSuggestions();
-  if (!picked.length) return;
-  // On passe par la route d'édition ordinaire : même vérification du texte
-  // d'origine, même pile d'annulation. Le LLM n'a aucun accès direct au PDF.
-  const edits = picked.map((li) => ({
-    id: li._suggestion.id,
-    text: li._suggestion.text,
-    original: li._suggestion.original,
-  }));
-  busy(true, 'Application des corrections…');
+async function acceptSuggestions(list) {
+  const usable = list.filter((s) => !s.lost);
+  if (!usable.length) return toast('Ces corrections ne sont plus localisables.', true);
+  usable.forEach((s) => s.mark && s.mark.classList.add('busy'));
+
+  // Un seul appel pour tout le lot : le serveur vérifie chaque texte d'origine,
+  // et l'ensemble tient dans une seule étape d'annulation.
+  const edits = usable.map((s) => ({ id: s.id, text: s.text, original: s.original }));
+  busy(true, usable.length > 1 ? 'Application des corrections…' : 'Application…');
   try {
     const data = await postJSON(`/api/${state.docId}/edit`, { edits });
     applyState(data);
-    refreshAll();
-    assist.results.hidden = true;
-    assist.info.textContent = `${data.changed} correction(s) appliquée(s)`;
+    const done = new Set(usable);
+    state.suggestions = state.suggestions.filter((s) => !done.has(s));
+    // On attend la réextraction des fragments avant de repositionner ce qui
+    // reste : sans cela les repères viseraient encore l'état d'avant.
+    const touched = [...new Set(usable.map((s) => s.page))];
+    await Promise.all(touched.map((pno) => {
+      const node = pageNode(pno);
+      return node ? refreshPage(node) : null;
+    }));
+    await showSuggestions(false);
     const skipped = data.skipped ? `, ${data.skipped} ignorée(s)` : '';
+    assist.info.textContent = `${data.changed} correction(s) appliquée(s)${skipped}`;
     toast(`${data.changed} correction(s) appliquée(s)${skipped} — Ctrl+Z pour annuler`);
   } catch (err) {
+    usable.forEach((s) => s.mark && s.mark.classList.remove('busy'));
     toast(err.message, true);
   } finally {
     busy(false);
   }
-});
+}
+
+$('#btn-assist-all').addEventListener('click', () => acceptSuggestions([...state.suggestions]));
+$('#btn-assist-none').addEventListener('click', () => rejectSuggestions([...state.suggestions]));
 
 /* ------------------------------------------------------- fiche du document */
 
@@ -2195,6 +2287,7 @@ $('#btn-close').addEventListener('click', async () => {
   el.thumbsBox.hidden = true;
   el.thumbs.innerHTML = '';
   state.scanPages = [];
+  dropSuggestions();
   setMenu(false);
   toggleFind(false);
   togglePages(false);

@@ -1459,6 +1459,9 @@ function paintSuggestions() {
     mark.style.fontWeight = item.bold ? '700' : '400';
     mark.style.fontStyle = item.italic ? 'italic' : 'normal';
     node.querySelector('.layer').appendChild(mark);
+    // Le fond opaque reprend la couleur du papier sous le fragment, sans quoi la
+    // proposition et le texte qu'elle remplace se liraient l'un sur l'autre.
+    mark.style.setProperty('--sugg-bg', sampleBackground(node, mark));
     s.mark = mark;
 
     // Les boutons vivent dans la marge du visualiseur, hors de la page : celle-ci

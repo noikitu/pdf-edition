@@ -126,6 +126,14 @@ def find_system_font(family: str, bold: bool, italic: bool) -> str | None:
 
 # ------------------------------------------------------------ polices embarquées
 
+# Contrôle des métriques : bornes de l'écart admis entre la largeur calculée par
+# la police et la largeur réellement occupée dans la page. Le seuil haut est
+# serré — une police plus large que le rendu trahit un encodage faux — le seuil
+# bas est lâche, une justification élargissant légitimement le rendu.
+METRIC_CEILING = 1.04
+METRIC_FLOOR = 0.75
+
+
 class FontResolver:
     """Résout la police d'écriture d'un fragment, avec mise en cache par document."""
 
@@ -134,6 +142,9 @@ class FontResolver:
         self._page_maps: dict[int, dict[str, int]] = {}
         self._embedded: dict[int, tuple[bytes, fitz.Font] | None] = {}
         self._files: dict[str, fitz.Font | None] = {}
+        # Verdict du contrôle de métriques, retenu par police : une fois qu'on
+        # sait qu'un encodage ment, inutile de le remesurer à chaque fragment.
+        self._trusted: dict[tuple, bool] = {}
 
     # -- niveau 1 : la police du PDF ---------------------------------------
     def _page_map(self, pno: int) -> dict[str, int]:
@@ -175,8 +186,36 @@ class FontResolver:
     def _covers(font: fitz.Font, text: str) -> bool:
         return all(font.has_glyph(ord(ch)) for ch in text)
 
+    def _metrics_ok(self, key, font: fitz.Font, probe) -> bool:
+        """La police reproduit-elle la largeur réellement occupée par le texte ?
+
+        `has_glyph` ne dit que la présence d'un dessin, pas sa justesse. Une
+        police embarquée dont la table d'encodage est décalée — cas courant des
+        sous-ensembles à encodage propre — possède tous les glyphes demandés
+        mais rend les mauvais : « Python » s'écrit alors « R{vjqp », sans
+        qu'aucune erreur ne soit levée.
+
+        On compare donc la largeur que cette police donnerait au texte d'origine
+        avec celle qu'il occupe réellement dans la page. Un encodage juste tombe
+        à 0,1 % près ; un décalage se trahit par plusieurs pour cent. Le seuil
+        est asymétrique : une justification ne peut qu'élargir le rendu, jamais
+        le resserrer, donc une police plus large que le rendu est bien plus
+        suspecte qu'une police plus étroite.
+        """
+        if key in self._trusted:
+            return self._trusted[key]
+        if not probe:
+            return True                      # rien pour juger : on laisse passer
+        text, size, width = probe
+        if not text.strip() or width <= 1 or size <= 0:
+            return True
+        natural = font.text_length(text, fontsize=size)
+        ok = width * METRIC_FLOOR <= natural <= width * METRIC_CEILING
+        self._trusted[key] = ok
+        return ok
+
     def resolve(
-        self, pno: int, basefont: str, fallback_alias: str, text: str
+        self, pno: int, basefont: str, fallback_alias: str, text: str, probe=None
     ) -> tuple[fitz.Font, bool]:
         """Renvoie (police à utiliser, typographie d'origine préservée ?).
 
@@ -190,13 +229,17 @@ class FontResolver:
         xref = page_map.get(_norm(basefont)) or page_map.get(_norm(family))
         if xref:
             embedded = self._load_embedded(xref)
-            if embedded and self._covers(embedded[1], text):
+            if (embedded and self._covers(embedded[1], text)
+                    and self._metrics_ok(("pdf", xref), embedded[1], probe)):
                 return embedded[1], True
 
         path = find_system_font(family, bold, italic)
         if path:
             font = self._load_file(path)
-            if font and self._covers(font, text):
+            # Le même contrôle vaut pour une police système : une substitution
+            # aux métriques différentes déformerait la ligne.
+            if (font and self._covers(font, text)
+                    and self._metrics_ok(("sys", path), font, probe)):
                 return font, True
 
         return base14_font(fallback_alias, text), False

@@ -1048,13 +1048,17 @@ button.active {
   padding: 0 3px;
   margin: 0 -3px;
   color: #10336f;
-  background: rgba(74, 144, 255, .2);
+  /* Le fond doit être opaque : translucide, il laissait lire en même temps le
+     texte d'origine et le texte proposé, superposés. La couleur de la page est
+     relevée par le script, la teinte bleue se pose par-dessus. */
+  background-color: var(--sugg-bg, #fff);
+  background-image: linear-gradient(rgba(74, 144, 255, .16), rgba(74, 144, 255, .16));
   box-shadow: inset 0 0 0 1px rgba(56, 124, 235, .55);
   cursor: default;
-  transition: background .12s, box-shadow .12s;
+  transition: background-image .12s, box-shadow .12s;
 }
 .sugg.aimed {
-  background: rgba(74, 144, 255, .34);
+  background-image: linear-gradient(rgba(74, 144, 255, .3), rgba(74, 144, 255, .3));
   box-shadow: inset 0 0 0 1px rgba(56, 124, 235, .9), 0 3px 10px rgba(56, 124, 235, .3);
 }
 .sugg.busy { opacity: .45; }

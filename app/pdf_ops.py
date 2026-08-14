@@ -366,6 +366,11 @@ def _erase(page: fitz.Page, rects: Iterable[fitz.Rect]) -> None:
         )
 
 
+def _probe(item: TextItem):
+    """Témoin de contrôle d'une police : ce que le document a réellement rendu."""
+    return (item.text, item.size, item.bbox[2] - item.bbox[0])
+
+
 def _write(
     page: fitz.Page,
     item: TextItem,
@@ -385,7 +390,11 @@ def _write(
     if style is not None and style.family:
         font, exact = fonts.choice_font(style.family, style.bold, style.italic)
     else:
-        font, exact = resolver.resolve(page.number, item.fontname, item.font, text)
+        # La largeur réellement occupée par le texte d'origine sert de témoin :
+        # une police qui ne la reproduit pas n'écrit pas ce qu'on croit.
+        font, exact = resolver.resolve(
+            page.number, item.fontname, item.font, text, _probe(item)
+        )
     size = item.size
     available = max(item.max_x - item.bbox[0], 1.0)
     width = font.text_length(text, fontsize=size)
@@ -707,11 +716,20 @@ def plan_reflow(
         return None
 
     # Une police par style présent, résolue une seule fois.
+    alone = {}
+    for run in para.runs:
+        alone[run.line] = alone.get(run.line, 0) + 1
     styles: dict = {}
     for run in runs:
         key = (run.fontname, run.size, run.color, run.alias)
         if key not in styles:
-            font, _ = resolver.resolve(page.number, run.fontname, run.alias, run.text)
+            # Une ligne d'origine qui ne portait qu'une portion donne sa largeur :
+            # c'est le seul témoin fiable dont on dispose ici.
+            probe = None
+            if alone.get(run.line) == 1 and 0 <= run.line < len(para.line_bboxes):
+                box = para.line_bboxes[run.line]
+                probe = (run.text, run.size, box[2] - box[0])
+            font, _ = resolver.resolve(page.number, run.fontname, run.alias, run.text, probe)
             styles[key] = {"font": font}
 
     tokens = _tokenize(runs, styles)
@@ -843,7 +861,7 @@ def _overflows(item: TextItem, text: str, resolver: FontResolver, style: Style |
     if style is not None and style.family:
         font, _ = fonts.choice_font(style.family, style.bold, style.italic)
     else:
-        font, _ = resolver.resolve(item.page, item.fontname, item.font, clean)
+        font, _ = resolver.resolve(item.page, item.fontname, item.font, clean, _probe(item))
     return font.text_length(clean, fontsize=item.size) > max(item.max_x - item.bbox[0], 1.0)
 
 

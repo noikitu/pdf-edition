@@ -223,16 +223,9 @@
   <span id="overlay-text">Chargement…</span>
 </div>
 
-<div id="lens" class="lens" hidden>
-  <i class="lens-ring r1"></i>
-  <i class="lens-ring r2"></i>
-  <i class="lens-ring r3"></i>
-  <i class="lens-ring r4"></i>
-  <i class="lens-ring r5"></i>
-  <i class="lens-ring r6"></i>
-  <i class="lens-caustic"></i>
-  <i class="lens-sheen"></i>
-</div>
+<!-- Loupe : l'optique est calculée au pixel dans ce canvas — courbure, dispersion
+     et reflets compris. Aucun calque CSS ne saurait les rendre honnêtement. -->
+<canvas id="lens" class="lens" hidden></canvas>
 <div id="toast" class="toast" hidden></div>
 
 <script src="/app.js"></script>

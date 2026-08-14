@@ -1011,108 +1011,25 @@ button.active {
   0%, 60% { opacity: 1; }
   100% { opacity: 0; }
 }
-
 /* ------------------------------------------------------------------- loupe */
 
-/* Disque de verre suivant le curseur. `pointer-events: none` est indispensable :
-   sans lui la loupe intercepterait le clic destiné au texte qu'elle grossit. */
+/* Le disque suit le curseur ; tout ce qui se passe à l'intérieur — courbure,
+   compression du bord, frange colorée, reflets — est calculé au pixel dans le
+   canvas par app.js. Il ne reste ici que la position, la découpe et l'ombre
+   portée, c'est-à-dire ce qui relève réellement de la mise en page.
+   `pointer-events: none` est indispensable : sans lui la loupe intercepterait le
+   clic destiné au texte qu'elle grossit. */
 .lens {
   position: fixed;
   left: 0;
   top: 0;
   z-index: 90;
-  width: 180px;
-  height: 180px;
   border-radius: 50%;
   pointer-events: none;
-  /* Déplacement par transform plutôt que left/top : à chaque mouvement de souris,
-     les huit calques du rebord seraient sinon remis en page un par un. */
+  /* Déplacement par transform : à chaque mouvement de souris, `left`/`top`
+     relanceraient une mise en page complète. */
   will-change: transform;
-  background-color: #fff;
-  background-repeat: no-repeat;
-  box-shadow:
-    /* biseau interne : ombre au nord-ouest, lumière au sud-est, comme un ménisque */
-    inset 0 2px 3px rgba(0, 0, 0, .22),
-    inset 0 -2px 4px rgba(255, 255, 255, .8),
-    inset 0 0 0 1px rgba(255, 255, 255, .3),
-    /* liseré du verre puis ombre portée sur la page */
-    0 0 0 1px rgba(120, 120, 100, .28),
-    0 0 0 3px rgba(255, 255, 255, .5),
-    0 16px 36px rgba(0, 0, 0, .28),
-    0 3px 8px rgba(0, 0, 0, .16);
-}
-
-/* Tous les calques du rebord partagent la même géométrie et la même image que le
-   disque : seuls changent le grossissement, le flou, et l'anneau où ils sont visibles. */
-.lens > i {
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  display: block;
-  pointer-events: none;
-}
-
-/* Anneaux réfractifs. Un seul anneau uniformément agrandi donnerait un bord plat :
-   c'est le *gradient* de déplacement — faible au début du rebord, très fort au
-   ras du bord — qui donne la sensation d'épaisseur et de matière liquide. */
-/* Aucun anneau ne doit être visible en tant que tel : ce sont les paliers de
-   grossissement qui trahissent l'empilement. D'où six couches aux écarts faibles,
-   et surtout des masques au fondu très long et largement chevauchants — chaque
-   couche a déjà commencé à apparaître bien avant que la précédente ne soit
-   pleinement opaque, si bien que la courbure se lit comme continue. */
-.lens-ring {
-  background: inherit;
-  transform: scale(var(--s));
-  filter: blur(var(--b));
-  /* montée d'opacité concave : presque rien sur la première moitié du fondu,
-     l'essentiel dans le dernier tiers, là où le verre courbe vraiment */
-  -webkit-mask: radial-gradient(closest-side,
-    transparent var(--inner), rgba(0, 0, 0, .1) var(--mid), rgba(0, 0, 0, .45) var(--out), #000 100%);
-  mask: radial-gradient(closest-side,
-    transparent var(--inner), rgba(0, 0, 0, .1) var(--mid), rgba(0, 0, 0, .45) var(--out), #000 100%);
-}
-.lens-ring.r1 { --s: 1.015; --inner: 42%; --mid: 68%; --out: 86%; --b: .1px; }
-.lens-ring.r2 { --s: 1.04;  --inner: 58%; --mid: 78%; --out: 90%; --b: .2px; }
-.lens-ring.r3 { --s: 1.075; --inner: 70%; --mid: 85%; --out: 93%; --b: .35px; }
-.lens-ring.r4 { --s: 1.12;  --inner: 80%; --mid: 90%; --out: 96%; --b: .55px; }
-.lens-ring.r5 { --s: 1.19;  --inner: 88%; --mid: 94%; --out: 98%; --b: .85px; }
-/* dernier millimètre : l'image s'y comprime le plus fort */
-.lens-ring.r6 { --s: 1.30;  --inner: 94%; --mid: 97%; --out: 99%; --b: 1.3px; }
-
-/* Caustique : la lumière traversant le verre se concentre en un croissant clair
-   juste à l'intérieur du rebord. Sa lente dérive autour du disque est ce qui fait
-   « couler » la matière — d'où une intensité faible, elle doit se sentir plus
-   qu'elle ne se voit. */
-.lens-caustic {
-  background:
-    radial-gradient(38% 26% at 70% 80%, rgba(255, 255, 255, .5), rgba(255, 255, 255, 0) 74%),
-    radial-gradient(26% 18% at 28% 74%, rgba(255, 255, 255, .28), rgba(255, 255, 255, 0) 76%);
-  mix-blend-mode: screen;
-  -webkit-mask: radial-gradient(closest-side, transparent 74%, #000 94%);
-  mask: radial-gradient(closest-side, transparent 74%, #000 94%);
-  animation: lens-liquid 6s ease-in-out infinite;
-}
-
-/* Reflets de surface : bandeau spéculaire en haut à gauche, et assombrissement
-   progressif du pourtour qui referme le volume. */
-.lens-sheen {
-  background:
-    radial-gradient(34% 22% at 30% 18%, rgba(255, 255, 255, .8), rgba(255, 255, 255, 0) 72%),
-    radial-gradient(16% 11% at 21% 31%, rgba(255, 255, 255, .6), rgba(255, 255, 255, 0) 78%),
-    radial-gradient(closest-side, rgba(0, 0, 0, 0) 72%, rgba(28, 28, 18, .16) 100%);
-  animation: lens-sheen-drift 6s ease-in-out infinite;
-}
-
-@keyframes lens-liquid {
-  0%, 100% { transform: rotate(-7deg) scale(1); }
-  50% { transform: rotate(9deg) scale(1.02); }
-}
-@keyframes lens-sheen-drift {
-  0%, 100% { transform: rotate(2deg); }
-  50% { transform: rotate(-3deg); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .lens-caustic, .lens-sheen { animation: none; }
+  filter: drop-shadow(0 16px 34px rgba(0, 0, 0, .3)) drop-shadow(0 3px 8px rgba(0, 0, 0, .18));
 }
 
 /* le curseur système n'a plus d'intérêt : la loupe est centrée sur lui */

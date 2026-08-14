@@ -1750,13 +1750,24 @@ function setLens(on) {
   if (on) toast('Loupe : molette pour régler le grossissement, Échap pour quitter');
 }
 
+/* La souris émet bien plus d'événements qu'il n'y a d'images à l'écran. Le rendu
+   étant calculé au pixel, on ne le fait qu'une fois par image, sur la dernière
+   position connue. */
+let lensPending = null;
+let lensFrame = 0;
+
 el.viewer.addEventListener('mousemove', (e) => {
   if (!state.lens) return;
   // Pendant la saisie d'un fragment, la loupe masquerait le texte en train
   // d'être tapé : on la retire le temps de l'édition.
   const node = state.editing ? null : e.target.closest('.page');
-  if (node) drawLens(node, e.clientX, e.clientY);
-  else el.lens.hidden = true;
+  if (!node) { lensPending = null; el.lens.hidden = true; return; }
+  lensPending = { node, x: e.clientX, y: e.clientY };
+  if (lensFrame) return;
+  lensFrame = requestAnimationFrame(() => {
+    lensFrame = 0;
+    if (lensPending && state.lens) drawLens(lensPending.node, lensPending.x, lensPending.y);
+  });
 });
 
 el.viewer.addEventListener('mouseleave', () => { el.lens.hidden = true; });
@@ -1772,39 +1783,229 @@ el.viewer.addEventListener('wheel', (e) => {
   drawLens(node, e.clientX, e.clientY);
 }, { passive: false });
 
-/** Place le disque sous le curseur et recadre l'image de la page derrière lui. */
-function drawLens(node, clientX, clientY) {
-  const img = node.querySelector('img');
-  if (!img || !img.complete || !img.naturalWidth) return;
-  const rect = img.getBoundingClientRect();
-  const half = LENS_SIZE / 2;
-  const f = state.lensZoom;
-  // Le point visé doit se retrouver au centre du disque : on décale donc le
-  // fond agrandi de la position du curseur, elle-même multipliée par f.
-  const x = (clientX - rect.left) * f;
-  const y = (clientY - rect.top) * f;
+/* Profil de la lentille : part linéaire du trajet optique. À 1 on obtient une
+   loupe plate, à grossissement constant ; plus on descend, plus le centre
+   grossit et plus le bord comprime. 0,55 correspond à une lentille
+   plan-convexe ordinaire. */
+const LENS_SHAPE = 0.55;
+/* Écart de déviation entre le rouge et le bleu — le verre disperse le spectre.
+   En pixels de la page, et volontairement sous le pixel : au-delà, ce n'est plus
+   une frange mais deux images décalées. */
+const LENS_FRINGE = 0.9;
 
-  el.lens.hidden = false;
-  el.lens.style.transform = `translate3d(${clientX - half}px, ${clientY - half}px, 0)`;
-  el.lens.style.backgroundImage = `url("${hiResSrc(node) || img.src}")`;
-  el.lens.style.backgroundSize = `${rect.width * f}px ${rect.height * f}px`;
-  el.lens.style.backgroundPosition = `${half - x}px ${half - y}px`;
+/* Table de correspondance rayon affiché → rayon échantillonné, en fractions du
+   rayon du disque. Elle ne dépend que du grossissement, on la recalcule donc
+   seulement à la molette et non à chaque mouvement de souris. */
+let lensMap = null;
+let lensMapKey = '';
+
+function lensMapping(f) {
+  const key = String(f);
+  if (lensMapKey === key) return lensMap;
+  const N = 1024;
+  const table = new Float32Array(N + 1);
+  for (let i = 0; i <= N; i++) {
+    const r = i / N;
+    // Cubique : la dérivée en 0 vaut LENS_SHAPE — c'est elle qui fixe le
+    // grossissement au centre — et croît vers le bord, d'où la compression.
+    table[i] = (LENS_SHAPE * r + (1 - LENS_SHAPE) * r * r * r) / (f * LENS_SHAPE);
+  }
+  lensMap = table;
+  lensMapKey = key;
+  return table;
 }
 
-/** Rendu à 4× de la page, chargé à la demande.
- *  L'image d'affichage n'a que 2× de détail : au-delà, la loupe grossirait du
- *  flou, précisément là où l'on veut voir net. Le premier passage sur une page
- *  utilise donc l'image courante, puis bascule sur la version fine une fois
- *  celle-ci arrivée. */
-function hiResSrc(node) {
-  const wanted = `/api/${state.docId}/page/${node.dataset.page}.png?scale=4&v=${state.version}`;
-  if (node._hiResSrc === wanted) return node._hiResReady ? wanted : null;
-  node._hiResSrc = wanted;
-  node._hiResReady = false;
-  const probe = new Image();
-  probe.onload = () => { if (node._hiResSrc === wanted) node._hiResReady = true; };
-  probe.src = wanted;
-  return null;
+/** Rend la loupe : chaque pixel du disque va chercher le sien dans la page.
+ *
+ *  Trois effets naissent de cette seule boucle, là où le CSS ne pouvait que les
+ *  imiter : la courbure — le bord échantillonne plus loin, donc comprime — la
+ *  dispersion — le rouge et le bleu ne sont pas déviés pareil, d'où une frange
+ *  d'un pixel au rebord et non deux anneaux colorés — et le relief, par un
+ *  éclairage calculé sur la pente de la surface.
+ */
+function drawLens(node, clientX, clientY) {
+  const source = lensSource(node);
+  const img = node.querySelector('img');
+  if (!source || !img) return;
+
+  const rect = img.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const size = Math.round(LENS_SIZE * dpr);
+  const R = size / 2;
+  const canvas = el.lens;
+  if (canvas.width !== size) {
+    canvas.width = canvas.height = size;
+    canvas.style.width = canvas.style.height = `${LENS_SIZE}px`;
+  }
+
+  // Pixels de l'image source par pixel de canvas.
+  const perPixel = (source.w / rect.width) / dpr;
+  const cx = (clientX - rect.left) * (source.w / rect.width);
+  const cy = (clientY - rect.top) * (source.h / rect.height);
+
+  const table = lensMapping(state.lensZoom);
+  // Rayon de la zone lue dans la page, marge comprise pour la dispersion.
+  const reach = Math.ceil(table[1024] * R * perPixel * (1 + LENS_FRINGE)) + 2;
+  // La zone est bornée à l'image : au bord d'une page, demander au-delà rendrait
+  // des pixels transparents que la loupe afficherait en noir.
+  const sx = Math.max(0, Math.round(cx) - reach);
+  const sy = Math.max(0, Math.round(cy) - reach);
+  const spanX = Math.min(source.w, Math.round(cx) + reach) - sx;
+  const spanY = Math.min(source.h, Math.round(cy) + reach) - sy;
+  if (spanX < 2 || spanY < 2) return;
+  const src = source.ctx.getImageData(sx, sy, spanX, spanY).data;
+
+  const out = lensBuffer(size);
+  const dst = out.data;
+
+  for (let y = 0; y < size; y++) {
+    const dy = y - R + 0.5;
+    for (let x = 0; x < size; x++) {
+      const dx = x - R + 0.5;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const i = (y * size + x) * 4;
+      const r = dist / R;
+      if (r >= 1) { dst[i + 3] = 0; continue; }
+
+      const t = table[(r * 1024) | 0];
+      const ux = dist > 0.0001 ? dx / dist : 0;
+      const uy = dist > 0.0001 ? dy / dist : 0;
+      const base = t * R * perPixel;
+      const gx = cx + ux * base, gy = cy + uy * base;
+
+      // Échantillonnage bilinéaire, non négociable ici : au centre la loupe
+      // agrandit au-delà de la résolution de la page — le plus proche voisin
+      // donnerait des marches d'escalier — et au bord elle réduit, ce qui
+      // produirait du crénelage.
+      bilinear3(src, spanX, spanY, gx - sx, gy - sy, rgb);
+      let red = rgb[0], green = rgb[1], blue = rgb[2];
+
+      // Dispersion : le verre dévie le bleu plus que le rouge. L'écart est
+      // maintenu sous le pixel et confiné au rebord — au-delà, ce n'est plus une
+      // frange mais du bruit coloré sur tout le texte.
+      const fringe = r > 0.72 ? (r - 0.72) / 0.28 : 0;
+      if (fringe > 0.01) {
+        const off = fringe * fringe * LENS_FRINGE;
+        red = bilinear1(src, spanX, spanY, gx - ux * off - sx, gy - uy * off - sy, 0);
+        blue = bilinear1(src, spanX, spanY, gx + ux * off - sx, gy + uy * off - sy, 2);
+      }
+
+      // Éclairage : le bord est en pente, donc plus sombre, et une source en
+      // haut à gauche y dépose un reflet.
+      const rim = r > 0.86 ? (r - 0.86) / 0.14 : 0;
+      const shade = 1 - 0.42 * rim * rim;
+      const spec = specular(dx / R, dy / R, r);
+
+      dst[i] = Math.min(255, red * shade + spec);
+      dst[i + 1] = Math.min(255, green * shade + spec);
+      dst[i + 2] = Math.min(255, blue * shade + spec);
+      // Le dernier pixel et demi s'estompe : sans cela le disque serait crénelé.
+      dst[i + 3] = Math.min(255, (1 - r) * R * 170);
+    }
+  }
+
+  const half = LENS_SIZE / 2;
+  el.lens.hidden = false;
+  el.lens.style.transform = `translate3d(${clientX - half}px, ${clientY - half}px, 0)`;
+  lensCtx(canvas).putImageData(out.image, 0, 0);
+}
+
+let lensContext = null;
+const lensCtx = (canvas) => (lensContext ||= canvas.getContext('2d'));
+
+/* Réutilisé à chaque pixel : trois nombres, mais alloués une seule fois. */
+const rgb = new Float32Array(3);
+
+/** Interpolation bilinéaire des trois canaux, poids calculés une fois. */
+function bilinear3(src, spanX, spanY, x, y, out) {
+  if (x < 0) x = 0; else if (x > spanX - 1.001) x = spanX - 1.001;
+  if (y < 0) y = 0; else if (y > spanY - 1.001) y = spanY - 1.001;
+  const x0 = x | 0, y0 = y | 0;
+  const tx = x - x0, ty = y - y0;
+  const i00 = (y0 * spanX + x0) * 4;
+  const i10 = i00 + 4;
+  const i01 = i00 + spanX * 4;
+  const i11 = i01 + 4;
+  for (let c = 0; c < 3; c++) {
+    const top = src[i00 + c] + (src[i10 + c] - src[i00 + c]) * tx;
+    const bottom = src[i01 + c] + (src[i11 + c] - src[i01 + c]) * tx;
+    out[c] = top + (bottom - top) * ty;
+  }
+}
+
+/** Même chose pour un seul canal, pour les points décalés de la dispersion. */
+function bilinear1(src, spanX, spanY, x, y, c) {
+  if (x < 0) x = 0; else if (x > spanX - 1.001) x = spanX - 1.001;
+  if (y < 0) y = 0; else if (y > spanY - 1.001) y = spanY - 1.001;
+  const x0 = x | 0, y0 = y | 0;
+  const tx = x - x0, ty = y - y0;
+  const i00 = (y0 * spanX + x0) * 4 + c;
+  const i01 = i00 + spanX * 4;
+  const top = src[i00] + (src[i00 + 4] - src[i00]) * tx;
+  const bottom = src[i01] + (src[i01 + 4] - src[i01]) * tx;
+  return top + (bottom - top) * ty;
+}
+
+/** Reflet spéculaire : une tache large en haut à gauche, une plus vive au bord. */
+function specular(nx, ny, r) {
+  const dx = nx + 0.34, dy = ny + 0.42;
+  const broad = Math.max(0, 1 - (dx * dx + dy * dy) * 3.2);
+  const edge = r > 0.88 ? Math.max(0, 1 - (dx * dx + dy * dy) * 1.1) * (r - 0.88) / 0.12 : 0;
+  return broad * broad * 92 + edge * 120;
+}
+
+/* Un seul tampon, réutilisé d'une image à l'autre : en allouer un à chaque
+   mouvement de souris ferait travailler le ramasse-miettes en continu. */
+let lensBuf = null;
+function lensBuffer(size) {
+  if (!lensBuf || lensBuf.size !== size) {
+    const image = new ImageData(size, size);
+    lensBuf = { size, image, data: image.data };
+  }
+  return lensBuf;
+}
+
+/** Copie de la page dans un canvas, pour pouvoir en lire les pixels.
+ *
+ *  L'image affichée n'a que 2× de détail : au-delà, la loupe grossirait du flou,
+ *  précisément là où l'on veut voir net. On demande donc un rendu à 4×, et on
+ *  se contente de l'image courante en attendant qu'il arrive. Une seule page est
+ *  gardée en mémoire à la fois : un rendu à 4× d'une A4 pèse une trentaine de
+ *  mégaoctets une fois décodé.
+ */
+function lensSource(node) {
+  const fine = `/api/${state.docId}/page/${node.dataset.page}.png?scale=4&v=${state.version}`;
+  if (node._lensWanted !== fine) {
+    node._lensWanted = fine;
+    const probe = new Image();
+    probe.onload = () => {
+      if (node._lensWanted === fine) adoptLensSource(node, probe, fine);
+    };
+    probe.src = fine;
+  }
+  if (node._lensSource && node._lensSource.key === node._lensKeyUsed) return node._lensSource;
+
+  const img = node.querySelector('img');
+  if (!node._lensSource && img && img.complete && img.naturalWidth) {
+    adoptLensSource(node, img, img.src);
+  }
+  return node._lensSource || null;
+}
+
+function adoptLensSource(node, image, key) {
+  if (node._lensSource && node._lensSource.key === key) return;
+  const canvas = document.createElement('canvas');
+  canvas.width = image.naturalWidth;
+  canvas.height = image.naturalHeight;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(image, 0, 0);
+  node._lensSource = { key, ctx, w: canvas.width, h: canvas.height };
+  node._lensKeyUsed = key;
+  // Les autres pages libèrent leur copie : une seule suffit, la loupe ne
+  // survole qu'une page à la fois.
+  el.viewer.querySelectorAll('.page').forEach((other) => {
+    if (other !== node) { other._lensSource = null; other._lensWanted = null; }
+  });
 }
 
 /* --------------------------------------------------- annuler / zoom / export */

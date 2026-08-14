@@ -1783,11 +1783,14 @@ el.viewer.addEventListener('wheel', (e) => {
   drawLens(node, e.clientX, e.clientY);
 }, { passive: false });
 
-/* Profil de la lentille : part linéaire du trajet optique. À 1 on obtient une
-   loupe plate, à grossissement constant ; plus on descend, plus le centre
-   grossit et plus le bord comprime. 0,55 correspond à une lentille
-   plan-convexe ordinaire. */
-const LENS_SHAPE = 0.55;
+/* Profil de la lentille. Une loupe n'est pas une bille de verre : son disque est
+   plat sur la plus grande partie de sa surface — grossissement rigoureusement
+   constant, image non déformée — et ne réfracte que dans la bande étroite du
+   rebord, là où le verre s'amincit.
+   LENS_FLAT est la part plate du rayon, LENS_RIM l'ampleur de la réfraction
+   au-delà. */
+const LENS_FLAT = 0.82;
+const LENS_RIM = 0.55;
 /* Écart de déviation entre le rouge et le bleu — le verre disperse le spectre.
    En pixels de la page, et volontairement sous le pixel : au-delà, ce n'est plus
    une frange mais deux images décalées. */
@@ -1806,9 +1809,13 @@ function lensMapping(f) {
   const table = new Float32Array(N + 1);
   for (let i = 0; i <= N; i++) {
     const r = i / N;
-    // Cubique : la dérivée en 0 vaut LENS_SHAPE — c'est elle qui fixe le
-    // grossissement au centre — et croît vers le bord, d'où la compression.
-    table[i] = (LENS_SHAPE * r + (1 - LENS_SHAPE) * r * r * r) / (f * LENS_SHAPE);
+    // Jusqu'à LENS_FLAT, la correspondance est strictement proportionnelle :
+    // le grossissement y vaut exactement f, sans la moindre courbure. Au-delà,
+    // un terme quadratique s'ajoute — nul et de pente nulle en LENS_FLAT, donc
+    // sans cassure visible — et va chercher l'image de plus en plus loin, ce qui
+    // la comprime contre le bord.
+    const u = r > LENS_FLAT ? (r - LENS_FLAT) / (1 - LENS_FLAT) : 0;
+    table[i] = (r + LENS_RIM * u * u) / f;
   }
   lensMap = table;
   lensMapKey = key;
@@ -1883,17 +1890,17 @@ function drawLens(node, clientX, clientY) {
       // Dispersion : le verre dévie le bleu plus que le rouge. L'écart est
       // maintenu sous le pixel et confiné au rebord — au-delà, ce n'est plus une
       // frange mais du bruit coloré sur tout le texte.
-      const fringe = r > 0.72 ? (r - 0.72) / 0.28 : 0;
+      const fringe = r > LENS_FLAT ? (r - LENS_FLAT) / (1 - LENS_FLAT) : 0;
       if (fringe > 0.01) {
         const off = fringe * fringe * LENS_FRINGE;
         red = bilinear1(src, spanX, spanY, gx - ux * off - sx, gy - uy * off - sy, 0);
         blue = bilinear1(src, spanX, spanY, gx + ux * off - sx, gy + uy * off - sy, 2);
       }
 
-      // Éclairage : le bord est en pente, donc plus sombre, et une source en
-      // haut à gauche y dépose un reflet.
-      const rim = r > 0.86 ? (r - 0.86) / 0.14 : 0;
-      const shade = 1 - 0.42 * rim * rim;
+      // Éclairage : seul le rebord est en pente, il est donc le seul assombri.
+      // Le centre, plat, ne doit porter aucun dégradé — c'est ce qui distingue
+      // une loupe posée sur la page d'une bille de verre.
+      const shade = 1 - 0.42 * fringe * fringe;
       const spec = specular(dx / R, dy / R, r);
 
       dst[i] = Math.min(255, red * shade + spec);
@@ -1946,12 +1953,17 @@ function bilinear1(src, spanX, spanY, x, y, c) {
   return top + (bottom - top) * ty;
 }
 
-/** Reflet spéculaire : une tache large en haut à gauche, une plus vive au bord. */
+/** Reflet : un verre plat ne porte pas de dôme lumineux, seulement un glissement
+ *  de lumière sur la tranche biseautée. La tache centrale est donc discrète, et
+ *  l'essentiel se joue sur le rebord, du côté de la source. */
 function specular(nx, ny, r) {
-  const dx = nx + 0.34, dy = ny + 0.42;
-  const broad = Math.max(0, 1 - (dx * dx + dy * dy) * 3.2);
-  const edge = r > 0.88 ? Math.max(0, 1 - (dx * dx + dy * dy) * 1.1) * (r - 0.88) / 0.12 : 0;
-  return broad * broad * 92 + edge * 120;
+  const dx = nx + 0.36, dy = ny + 0.44;
+  const near = dx * dx + dy * dy;
+  const sheen = Math.max(0, 1 - near * 6) * 26;
+  const edge = r > LENS_FLAT
+    ? Math.max(0, 1 - near * 0.9) * ((r - LENS_FLAT) / (1 - LENS_FLAT)) ** 1.5 * 150
+    : 0;
+  return sheen + edge;
 }
 
 /* Un seul tampon, réutilisé d'une image à l'autre : en allouer un à chaque
